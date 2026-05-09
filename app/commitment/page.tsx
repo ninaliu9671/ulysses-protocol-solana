@@ -2,8 +2,6 @@ import { NavBar } from "../components/nav-bar";
 import { TypesExplainer } from "../components/types-explainer";
 import { CreateCommitmentForm } from "../components/create-commitment-form";
 import { MyCommitmentsSection } from "../components/my-commitments";
-import { LeaderboardSection } from "../components/leaderboard-section";
-import { SirenGraveyardSection } from "../components/siren-graveyard";
 import { SiteFooter } from "../components/site-footer";
 
 export default function CommitmentPage() {
@@ -24,10 +22,6 @@ export default function CommitmentPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <CreateCommitmentForm />
             <MyCommitmentsSection />
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <LeaderboardSection limit={5} />
-            <SirenGraveyardSection limit={5} />
           </div>
         </div>
       </main>

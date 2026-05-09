@@ -13,15 +13,7 @@ import {
   getCreateNoTradeWindowInstructionAsync,
   getCreateAgentGuardianInstructionAsync,
 } from "../generated/vault";
-
-type CommitmentTypeKey = "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian";
-
-const TYPE_LABELS: Record<CommitmentTypeKey, string> = {
-  NoSell: "NoSell — never sell below current balance",
-  HoldAbove: "HoldAbove — hold above a chosen floor",
-  NoTradeWindow: "NoTradeWindow — no trades in a UTC window",
-  AgentGuardian: "AgentGuardian — only an agent key may move funds",
-};
+import { COMMITMENT_TYPES, TYPE_BY_KEY, type CommitmentTypeKey } from "../lib/commitment-types";
 
 const DURATION_PRESETS = [7, 30, 90, 180, 365];
 
@@ -113,7 +105,10 @@ export function CreateCommitmentForm() {
     return `Local (${tz}): ${String(ls).padStart(2, "0")}:00 → ${String(le).padStart(2, "0")}:00${ls > le ? " (crosses midnight)" : ""}`;
   }, [type, windowStart, windowEnd]);
 
-  const canSubmit = !!signer && !conflictMessage && !isSending;
+  const windowInvalid =
+    type === "NoTradeWindow" && (windowStart === "" || windowEnd === "" || windowStart === windowEnd);
+
+  const canSubmit = !!signer && !conflictMessage && !isSending && !windowInvalid;
 
   async function handleSubmit() {
     if (!signer) {
@@ -201,8 +196,8 @@ export function CreateCommitmentForm() {
           className="w-full px-3 py-2 rounded"
           style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
         >
-          {(Object.keys(TYPE_LABELS) as CommitmentTypeKey[]).map((k) => (
-            <option key={k} value={k}>{TYPE_LABELS[k]}</option>
+          {COMMITMENT_TYPES.map((t) => (
+            <option key={t.key} value={t.key}>{t.emoji} {t.label} — {t.tagline}</option>
           ))}
         </select>
       </Field>
@@ -235,16 +230,34 @@ export function CreateCommitmentForm() {
           <div className="grid grid-cols-2 gap-3">
             <Field label="WINDOW START HOUR (UTC, 0-23)">
               <input
+                type="number"
+                min={0}
+                max={23}
+                step={1}
                 value={windowStart}
-                onChange={(e) => setWindowStart(e.target.value.trim())}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9]/g, "");
+                  if (v === "") return setWindowStart("");
+                  const n = Math.max(0, Math.min(23, parseInt(v, 10)));
+                  setWindowStart(String(n));
+                }}
                 className="w-full px-3 py-2 rounded"
                 style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
               />
             </Field>
-            <Field label="WINDOW END HOUR (UTC, exclusive)">
+            <Field label="WINDOW END HOUR (UTC, exclusive, 0-23)">
               <input
+                type="number"
+                min={0}
+                max={23}
+                step={1}
                 value={windowEnd}
-                onChange={(e) => setWindowEnd(e.target.value.trim())}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9]/g, "");
+                  if (v === "") return setWindowEnd("");
+                  const n = Math.max(0, Math.min(23, parseInt(v, 10)));
+                  setWindowEnd(String(n));
+                }}
                 className="w-full px-3 py-2 rounded"
                 style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
               />
@@ -252,6 +265,9 @@ export function CreateCommitmentForm() {
           </div>
           {windowLocalPreview && (
             <div className="text-xs mb-3" style={{ color: "var(--muted)" }}>{windowLocalPreview}</div>
+          )}
+          {windowStart !== "" && windowEnd !== "" && windowStart === windowEnd && (
+            <div className="text-xs mb-3" style={{ color: "#fca5a5" }}>Window cannot be 0 hours (start = end).</div>
           )}
         </>
       )}

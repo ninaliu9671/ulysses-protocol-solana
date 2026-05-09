@@ -17,6 +17,7 @@ import {
   getCancelNoTradeWindowInstructionAsync,
   getCancelAgentGuardianInstructionAsync,
 } from "../generated/vault";
+import { TYPE_BY_KEY } from "../lib/commitment-types";
 
 const PRECISION = 1_000_000_000n;
 
@@ -43,17 +44,17 @@ export function MyCommitmentsSection() {
   const rows: Row[] = useMemo(() => {
     const out: Row[] = [];
     for (const c of userCommits.noSell) {
-      out.push({ pubkey: c.pubkey, type: "NoSell", label: `NoSell · ${c.targetMint.slice(0, 4)}…${c.targetMint.slice(-4)}`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
+      out.push({ pubkey: c.pubkey, type: "NoSell", label: `${TYPE_BY_KEY.NoSell.emoji} NoSell · ${c.targetMint.slice(0, 4)}…${c.targetMint.slice(-4)}`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
     }
     for (const c of userCommits.holdAbove) {
-      out.push({ pubkey: c.pubkey, type: "HoldAbove", label: `HoldAbove · ${c.targetMint.slice(0, 4)}…${c.targetMint.slice(-4)} ≥ ${c.floorAmount}`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
+      out.push({ pubkey: c.pubkey, type: "HoldAbove", label: `${TYPE_BY_KEY.HoldAbove.emoji} HoldAbove · ${c.targetMint.slice(0, 4)}…${c.targetMint.slice(-4)} ≥ ${c.floorAmount}`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
     }
     for (const c of userCommits.noTradeWindow) {
-      out.push({ pubkey: c.pubkey, type: "NoTradeWindow", label: `NoTradeWindow · ${String(c.windowStartHour).padStart(2, "0")}:00→${String(c.windowEndHour).padStart(2, "0")}:00 UTC`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
+      out.push({ pubkey: c.pubkey, type: "NoTradeWindow", label: `${TYPE_BY_KEY.NoTradeWindow.emoji} NoTradeWindow · ${String(c.windowStartHour).padStart(2, "0")}:00→${String(c.windowEndHour).padStart(2, "0")}:00 UTC`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
     }
     if (userCommits.agentGuardian) {
       const c = userCommits.agentGuardian;
-      out.push({ pubkey: c.pubkey, type: "AgentGuardian", label: `AgentGuardian · ${c.guardianPubkey.slice(0, 4)}…${c.guardianPubkey.slice(-4)}`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
+      out.push({ pubkey: c.pubkey, type: "AgentGuardian", label: `${TYPE_BY_KEY.AgentGuardian.emoji} AgentGuardian · ${c.guardianPubkey.slice(0, 4)}…${c.guardianPubkey.slice(-4)}`, stakeAmount: c.stakeAmount, weight: c.weight, rewardDebt: c.rewardDebt, createdAt: c.createdAt, expiresAt: c.expiresAt });
     }
     return out.sort((a, b) => Number(b.createdAt - a.createdAt));
   }, [userCommits]);

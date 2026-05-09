@@ -1,9 +1,12 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { WalletButton } from "./wallet-button";
-import { ClusterSelect } from "./cluster-select";
 
 export function NavBar() {
+  const pathname = usePathname();
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname?.startsWith(href);
   return (
     <header
       className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-4"
@@ -43,27 +46,49 @@ export function NavBar() {
           { label: "Home", href: "/" },
           { label: "Commitment", href: "/commitment" },
           { label: "Leaderboard", href: "/leaderboard" },
-        ].map((item) => (
-          <a
-            key={item.label}
-            href={item.href}
-            style={{
-              fontSize: 13,
-              color: "var(--muted)",
-              fontWeight: 500,
-              transition: "color 0.15s",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--foreground)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}
-          >
-            {item.label}
-          </a>
-        ))}
+        ].map((item) => {
+          const active = isActive(item.href);
+          return (
+            <a
+              key={item.label}
+              href={item.href}
+              style={{
+                fontSize: 13,
+                color: active ? "var(--gold)" : "var(--muted)",
+                fontWeight: active ? 700 : 500,
+                transition: "color 0.15s",
+                paddingBottom: 4,
+                borderBottom: active ? "1.5px solid var(--gold)" : "1.5px solid transparent",
+                textShadow: active ? "0 0 12px rgba(201,169,110,0.4)" : "none",
+              }}
+              onMouseEnter={(e) => {
+                if (!active) e.currentTarget.style.color = "var(--foreground)";
+              }}
+              onMouseLeave={(e) => {
+                if (!active) e.currentTarget.style.color = "var(--muted)";
+              }}
+            >
+              {item.label}
+            </a>
+          );
+        })}
       </nav>
 
       {/* Right controls */}
       <div className="flex items-center gap-3">
-        <ClusterSelect />
+        <div
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+          style={{
+            background: "rgba(201,169,110,0.08)",
+            border: "1px solid var(--border)",
+            fontSize: 11,
+            color: "var(--muted)",
+            letterSpacing: "0.05em",
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }} />
+          devnet
+        </div>
         <WalletButton />
       </div>
     </header>

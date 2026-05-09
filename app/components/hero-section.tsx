@@ -134,16 +134,18 @@ export function HeroSection() {
 function StatsBar() {
   const metrics = useProtocolMetrics();
 
-  const tvl = metrics
-    ? (Number(metrics.totalStakedLamports) / 1e9).toFixed(2) + " SOL"
-    : "—";
-  const activeCount = metrics ? metrics.activeCommitments.toString() : "—";
-  const totalWeight = metrics ? metrics.totalWeight.toString() : "—";
+  const fmt = (lamports: bigint | undefined): string =>
+    lamports === undefined ? "—" : (Number(lamports) / 1e9).toFixed(2) + " SOL";
 
   const stats = [
-    { icon: <VaultIcon />, value: tvl, label: "Total Staked" },
-    { icon: <CommitmentsIcon />, value: activeCount, label: "Active Commitments" },
-    { icon: <RewardIcon />, value: totalWeight, label: "Total Weight" },
+    { icon: <VaultIcon />, value: fmt(metrics?.totalStakedLamports), label: "Total Staked" },
+    {
+      icon: <CommitmentsIcon />,
+      value: metrics ? metrics.activeCommitments.toString() : "—",
+      label: "Active Commitments",
+    },
+    { icon: <RewardIcon />, value: fmt(metrics?.totalSlashedLamports), label: "Total Slashed" },
+    { icon: <RewardIcon />, value: fmt(metrics?.totalRedistributedLamports), label: "Total Redistributed" },
   ];
 
   return (
