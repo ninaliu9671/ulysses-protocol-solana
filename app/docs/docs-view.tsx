@@ -39,26 +39,36 @@ export function DocsView({ markdown }: { markdown: string }) {
   const toc = useMemo(() => buildToc(markdown), [markdown]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Highlight TOC entry whose section is in view.
+  // Highlight TOC entry whose section is currently in view.
+  // Use scroll listener over IntersectionObserver because IO doesn't fire
+  // for headings already-past on initial mount or after hash navigation.
   useEffect(() => {
-    const headings = toc
-      .map((t) => document.getElementById(t.id))
-      .filter((el): el is HTMLElement => !!el);
-    if (headings.length === 0) return;
+    const ids = toc.map((t) => t.id);
 
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((e) => e.isIntersecting);
-        if (visible.length > 0) {
-          // Closest to top wins
-          visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-          setActiveId(visible[0].target.id);
-        }
-      },
-      { rootMargin: "-100px 0px -60% 0px", threshold: 0 },
-    );
-    headings.forEach((h) => obs.observe(h));
-    return () => obs.disconnect();
+    function update() {
+      const headings = ids
+        .map((id) => ({ id, el: document.getElementById(id) }))
+        .filter((x): x is { id: string; el: HTMLElement } => !!x.el);
+      if (headings.length === 0) return;
+
+      // Activation line ~120px below viewport top (clears the fixed nav).
+      const ACTIVATION_Y = 120;
+      let current: string | null = headings[0].id;
+      for (const h of headings) {
+        const top = h.el.getBoundingClientRect().top;
+        if (top - ACTIVATION_Y <= 0) current = h.id;
+        else break;
+      }
+      setActiveId(current);
+    }
+
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
   }, [toc]);
 
   return (
