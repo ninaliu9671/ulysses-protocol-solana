@@ -83,16 +83,18 @@ export async function fetchSlashedEvents(
   limit: number,
 ): Promise<SlashedEvent[]> {
   const slashedDisc = await getSlashedDisc();
+  // Cap sig fetch — public devnet RPC chokes on big lists.
   const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
     VAULT_PROGRAM_ADDRESS,
-    { limit: Math.max(limit * 4, 100) },
+    { limit: 100 },
   ]);
   if (!sigs?.length) return [];
 
   const events: SlashedEvent[] = [];
-  // Walk in batches; tx meta fetch is the slow part.
-  for (let i = 0; i < sigs.length && events.length < limit; i += 8) {
-    const batch = sigs.slice(i, i + 8);
+  // Sequential batches of 3 to stay under devnet rate limit (~10 req/s).
+  const BATCH = 3;
+  for (let i = 0; i < sigs.length && events.length < limit; i += BATCH) {
+    const batch = sigs.slice(i, i + BATCH);
     const txs = await Promise.all(
       batch.map((s) =>
         rpcCall<TxMeta>(rpcUrl, "getTransaction", [

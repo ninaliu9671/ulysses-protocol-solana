@@ -134,7 +134,7 @@ export function HeroSection() {
 
 function StatsBar() {
   const metrics = useProtocolMetrics();
-  const { events: slashedEvents } = useSlashedEvents(500);
+  const { events: slashedEvents } = useSlashedEvents(50);
 
   const fmt = (lamports: bigint | undefined): string =>
     lamports === undefined ? "—" : (Number(lamports) / 1e9).toFixed(2) + " SOL";

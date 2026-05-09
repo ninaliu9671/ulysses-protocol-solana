@@ -6,14 +6,35 @@ export async function rpcCall<T = unknown>(
   method: string,
   params: unknown[],
 ): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const json = (await res.json()) as { result?: T; error?: { message: string } };
-  if (json.error) throw new Error(json.error.message);
-  return json.result as T;
+  // Public devnet RPC throttles aggressively. Retry with exponential backoff
+  // on 429 / network errors so the UI doesn't show "—" forever.
+  const delays = [250, 500, 1000, 2000, 4000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      if (res.status === 429 && attempt < delays.length) {
+        await sleep(delays[attempt]);
+        continue;
+      }
+      const json = (await res.json()) as { result?: T; error?: { message: string } };
+      if (json.error) throw new Error(json.error.message);
+      return json.result as T;
+    } catch (e) {
+      if (attempt < delays.length) {
+        await sleep(delays[attempt]);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
