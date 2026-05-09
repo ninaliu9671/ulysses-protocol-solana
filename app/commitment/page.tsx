@@ -11,9 +11,12 @@ export default function CommitmentPage() {
       <main className="pt-24 pb-12">
         <div className="max-w-7xl mx-auto px-8 space-y-6">
           <div>
-            <h1 className="text-3xl font-bold mb-4" style={{ color: "var(--foreground)", fontFamily: "var(--font-serif)" }}>
+            <h1 className="text-3xl font-bold mb-2" style={{ color: "var(--foreground)", fontFamily: "var(--font-serif)" }}>
               Make a Commitment
             </h1>
+            <p className="text-sm mb-5" style={{ color: "var(--muted)" }}>
+              Choose your vow. Stake SOL behind it. Stay the course or be slashed.
+            </p>
             <FlowDiagram />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
