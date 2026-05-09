@@ -1,11 +1,6 @@
 "use client";
 
-import useSWR from "swr";
-import {
-  fetchWatcherCommitments,
-  fetchWatcherHistory,
-  lamportsToSol,
-} from "../lib/watcher";
+import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
 
 export function HeroSection() {
   return (
@@ -100,7 +95,7 @@ export function HeroSection() {
           {/* CTAs */}
           <div className="flex flex-wrap gap-3">
             <a
-              href="#commitment"
+              href="/commitment"
               className="flex items-center gap-2 px-6 py-3 rounded font-semibold text-sm transition-opacity hover:opacity-90"
               style={{
                 background: "var(--gold)",
@@ -113,7 +108,7 @@ export function HeroSection() {
               Make a Commitment
             </a>
             <a
-              href="#how-it-works"
+              href="/leaderboard"
               className="flex items-center gap-2 px-6 py-3 rounded font-semibold text-sm transition-opacity hover:opacity-80"
               style={{
                 border: "1px solid var(--border-strong)",
@@ -123,7 +118,7 @@ export function HeroSection() {
               }}
             >
               <PlayIcon />
-              Watch Demo
+              View Leaderboard
             </a>
           </div>
         </div>
@@ -137,21 +132,18 @@ export function HeroSection() {
 }
 
 function StatsBar() {
-  const { data: commitments } = useSWR("watcher-commitments-hero", fetchWatcherCommitments, { refreshInterval: 60_000 });
-  const { data: history } = useSWR("watcher-history-hero", fetchWatcherHistory, { refreshInterval: 60_000 });
+  const metrics = useProtocolMetrics();
 
-  const tvl = commitments
-    ? commitments.reduce((sum, c) => sum + lamportsToSol(c.stake_amount), 0).toFixed(2) + " SOL"
+  const tvl = metrics
+    ? (Number(metrics.totalStakedLamports) / 1e9).toFixed(2) + " SOL"
     : "—";
-  const activeCount = commitments ? commitments.length.toString() : "—";
-  const totalRewards = history
-    ? history.reduce((sum, s) => sum + lamportsToSol(s.amount), 0).toFixed(2) + " SOL"
-    : "—";
+  const activeCount = metrics ? metrics.activeCommitments.toString() : "—";
+  const totalWeight = metrics ? metrics.totalWeight.toString() : "—";
 
   const stats = [
-    { icon: <VaultIcon />, value: tvl, label: "Total Value Locked" },
+    { icon: <VaultIcon />, value: tvl, label: "Total Staked" },
     { icon: <CommitmentsIcon />, value: activeCount, label: "Active Commitments" },
-    { icon: <RewardIcon />, value: totalRewards, label: "Total Rewards Paid" },
+    { icon: <RewardIcon />, value: totalWeight, label: "Total Weight" },
   ];
 
   return (

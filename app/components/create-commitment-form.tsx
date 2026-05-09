@@ -1,661 +1,344 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import {
-  address,
-  type Address,
-  type Instruction,
-  type IAccountMeta,
-  getProgramDerivedAddress,
-  getAddressEncoder,
-  getBase58Decoder,
-} from "@solana/kit";
+import { useEffect, useMemo, useState } from "react";
+import { address, type Address } from "@solana/kit";
 import { toast } from "sonner";
 import { useWallet } from "../lib/wallet/context";
 import { useSendTransaction } from "../lib/hooks/use-send-transaction";
-import { useCluster } from "./cluster-context";
+import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
+import { useUserCommitments } from "../lib/hooks/use-user-commitments";
+import {
+  getCreateNoSellInstructionAsync,
+  getCreateHoldAboveInstructionAsync,
+  getCreateNoTradeWindowInstructionAsync,
+  getCreateAgentGuardianInstructionAsync,
+} from "../generated/vault";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+type CommitmentTypeKey = "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian";
 
-const PROGRAM_ID: Address = address(
-  "7s1UK1nQWK7CrNcaS576gbpMjMqrph1vArRepnQYLki7"
-);
-const TREASURY: Address = address(
-  "mkzyaL8Xie6T3GHGrfCydeMk6JEajEWnkxrmjwZNgLJ"
-);
-const ACTIVATION_FEE_LAMPORTS = 1_000_000n; // 0.001 SOL
-const SYSTEM_PROGRAM: Address = address(
-  "11111111111111111111111111111111"
-);
-
-// Anchor discriminator for create_commitment (pre-verified)
-const CREATE_COMMITMENT_DISC = new Uint8Array([
-  0xe8, 0x1f, 0x76, 0x41, 0xe5, 0x02, 0x02, 0xaa,
-]);
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type CommitmentTypeKey =
-  | "NoBuy"
-  | "NoSell"
-  | "HoldAbove"
-  | "HoldUntil"
-  | "NoTradeWindow";
-
-interface FormState {
-  targetMint: string;
-  stakeAmountSol: string;
-  commitmentType: CommitmentTypeKey;
-  durationDays: string;      // for NoBuy/NoSell/HoldAbove/NoTradeWindow
-  threshold: string;         // HoldAbove: token amount
-  unlockAt: string;          // HoldUntil: unix timestamp (seconds)
-  startHour: string;         // NoTradeWindow: 0-23
-  endHour: string;           // NoTradeWindow: 0-23
-}
-
-// ─── Instruction builders ────────────────────────────────────────────────────
-
-function buildTransferInstruction(
-  from: Address,
-  to: Address,
-  lamports: bigint
-): Instruction {
-  const data = new Uint8Array(12);
-  const view = new DataView(data.buffer);
-  view.setUint32(0, 2, true);           // system transfer discriminator
-  view.setBigUint64(4, lamports, true); // amount
-
-  return {
-    programAddress: SYSTEM_PROGRAM,
-    accounts: [
-      { address: from, role: 3 } as IAccountMeta, // writable + signer
-      { address: to, role: 1 } as IAccountMeta,   // writable
-    ],
-    data,
-  };
-}
-
-function encodeCommitmentType(
-  key: CommitmentTypeKey,
-  threshold: string,
-  unlockAt: string,
-  startHour: string,
-  endHour: string
-): Uint8Array {
-  switch (key) {
-    case "NoBuy":
-      return new Uint8Array([0]);
-    case "NoSell":
-      return new Uint8Array([1]);
-    case "HoldAbove": {
-      const bytes = new Uint8Array(9);
-      bytes[0] = 2;
-      new DataView(bytes.buffer).setBigUint64(
-        1,
-        BigInt(Math.round(parseFloat(threshold) * 1_000_000_000)),
-        true
-      );
-      return bytes;
-    }
-    case "HoldUntil": {
-      const bytes = new Uint8Array(9);
-      bytes[0] = 3;
-      new DataView(bytes.buffer).setBigInt64(
-        1,
-        BigInt(Math.round(parseFloat(unlockAt))),
-        true
-      );
-      return bytes;
-    }
-    case "NoTradeWindow": {
-      return new Uint8Array([
-        4,
-        Math.min(23, Math.max(0, parseInt(startHour, 10) || 0)),
-        Math.min(23, Math.max(0, parseInt(endHour, 10) || 0)),
-      ]);
-    }
-  }
-}
-
-async function deriveCommitmentPda(
-  owner: Address,
-  targetMint: Address
-): Promise<Address> {
-  const [pda] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
-    seeds: [
-      new TextEncoder().encode("commitment"),
-      getAddressEncoder().encode(owner),
-      getAddressEncoder().encode(targetMint),
-    ],
-  });
-  return pda;
-}
-
-async function deriveVaultPda(commitmentPda: Address): Promise<Address> {
-  const [pda] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
-    seeds: [
-      new TextEncoder().encode("vault"),
-      getAddressEncoder().encode(commitmentPda),
-    ],
-  });
-  return pda;
-}
-
-async function deriveProtocolStatePda(): Promise<Address> {
-  const [pda] = await getProgramDerivedAddress({
-    programAddress: PROGRAM_ID,
-    seeds: [new TextEncoder().encode("protocol")],
-  });
-  return pda;
-}
-
-function buildCreateCommitmentInstruction(
-  owner: Address,
-  targetMint: Address,
-  commitmentTypeBytes: Uint8Array,
-  stakeLamports: bigint,
-  durationSecs: number,
-  guardianPubkey: Address | null,
-  commitmentPda: Address,
-  vaultPda: Address,
-  protocolStatePda: Address
-): Instruction {
-  const decoder = getBase58Decoder();
-
-  const stakeBytes = new Uint8Array(8);
-  new DataView(stakeBytes.buffer).setBigUint64(0, stakeLamports, true);
-
-  const durationBytes = new Uint8Array(4);
-  new DataView(durationBytes.buffer).setUint32(0, durationSecs, true);
-
-  let guardianBytes: Uint8Array;
-  if (guardianPubkey === null) {
-    guardianBytes = new Uint8Array([0]); // Option::None
-  } else {
-    const guardianArr = decoder.decode(guardianPubkey);
-    guardianBytes = new Uint8Array([1, ...guardianArr]);
-  }
-
-  const data = new Uint8Array([
-    ...CREATE_COMMITMENT_DISC,
-    ...commitmentTypeBytes,
-    ...stakeBytes,
-    ...durationBytes,
-    ...guardianBytes,
-  ]);
-
-  return {
-    programAddress: PROGRAM_ID,
-    accounts: [
-      { address: owner, role: 3 } as IAccountMeta,              // owner: mut signer
-      { address: targetMint, role: 0 } as IAccountMeta,         // target_mint: readonly
-      { address: commitmentPda, role: 1 } as IAccountMeta,      // commitment_account: mut
-      { address: vaultPda, role: 1 } as IAccountMeta,           // commitment_vault: mut
-      { address: protocolStatePda, role: 1 } as IAccountMeta,   // protocol_state: mut
-      { address: SYSTEM_PROGRAM, role: 0 } as IAccountMeta,     // system_program
-    ],
-    data,
-  };
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-const DEFAULT_FORM: FormState = {
-  targetMint: "",
-  stakeAmountSol: "0.01",
-  commitmentType: "NoBuy",
-  durationDays: "3",
-  threshold: "0",
-  unlockAt: "",
-  startHour: "9",
-  endHour: "17",
+const TYPE_LABELS: Record<CommitmentTypeKey, string> = {
+  NoSell: "NoSell — never sell below current balance",
+  HoldAbove: "HoldAbove — hold above a chosen floor",
+  NoTradeWindow: "NoTradeWindow — no trades in a UTC window",
+  AgentGuardian: "AgentGuardian — only an agent key may move funds",
 };
 
-const DURATION_OPTIONS: Record<CommitmentTypeKey, { label: string; days: number }[]> = {
-  NoBuy:         [{ label: "1d", days: 1 }, { label: "2d", days: 2 }, { label: "3d ★", days: 3 }],
-  NoSell:        [{ label: "1d", days: 1 }, { label: "3d", days: 3 }, { label: "7d ★", days: 7 }],
-  HoldAbove:     [{ label: "7d", days: 7 }, { label: "14d", days: 14 }, { label: "30d ★", days: 30 }],
-  HoldUntil:     [],
-  NoTradeWindow: [{ label: "7d", days: 7 }, { label: "14d", days: 14 }, { label: "30d ★", days: 30 }],
-};
+const DURATION_PRESETS = [7, 30, 90, 180, 365];
+
+const LAMPORTS_PER_SOL = 1_000_000_000n;
+
+// integer sqrt for u128 (matches on-chain math.rs)
+function integerSqrt(n: bigint): bigint {
+  if (n < 0n) throw new Error("neg");
+  if (n < 2n) return n;
+  let x = n;
+  let y = (x + 1n) / 2n;
+  while (y < x) {
+    x = y;
+    y = (x + n / x) / 2n;
+  }
+  return x;
+}
 
 export function CreateCommitmentForm() {
-  const { wallet, signer, status } = useWallet();
+  const { signer } = useWallet();
+  const walletAddress = signer?.address;
   const { send, isSending } = useSendTransaction();
-  const { getExplorerUrl } = useCluster();
+  const metrics = useProtocolMetrics();
+  const userCommits = useUserCommitments(walletAddress);
 
-  const [form, setForm] = useState<FormState>(DEFAULT_FORM);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [type, setType] = useState<CommitmentTypeKey>("NoSell");
+  const [targetMint, setTargetMint] = useState("");
+  const [durationDays, setDurationDays] = useState("30");
+  const [stakeSol, setStakeSol] = useState("0.05");
+  const [floorAmount, setFloorAmount] = useState("");
+  const [windowStart, setWindowStart] = useState("2");
+  const [windowEnd, setWindowEnd] = useState("5");
+  const [guardian, setGuardian] = useState("");
 
-  const walletAddress = wallet?.account.address;
-
-  const setField = useCallback(
-    <K extends keyof FormState>(key: K, value: FormState[K]) => {
-      setForm((prev) => ({ ...prev, [key]: value }));
-    },
-    []
-  );
-
-  const handleSubmit = useCallback(async () => {
-    if (!walletAddress || !signer) {
-      toast.error("Please connect your wallet first.");
-      return;
-    }
-
-    const targetMintStr = form.targetMint.trim();
-    const stakeSOL = parseFloat(form.stakeAmountSol);
-
-    if (!targetMintStr) {
-      toast.error("Please enter a target mint address.");
-      return;
-    }
-    if (isNaN(stakeSOL) || stakeSOL < 0.01) {
-      toast.error("Minimum stake is 0.01 SOL.");
-      return;
-    }
-
-    let targetMintAddr: Address;
+  // Derived: weight + share
+  const weight = useMemo(() => {
     try {
-      targetMintAddr = address(targetMintStr);
+      const stakeLamports = BigInt(Math.floor(parseFloat(stakeSol) * 1e9));
+      const days = BigInt(parseInt(durationDays, 10));
+      if (stakeLamports <= 0n || days <= 0n) return 0n;
+      return integerSqrt(stakeLamports * days);
     } catch {
-      toast.error("Invalid target mint address.");
+      return 0n;
+    }
+  }, [stakeSol, durationDays]);
+
+  const networkTotal = metrics?.totalWeight ?? 0n;
+  const sharePct = useMemo(() => {
+    if (networkTotal === 0n) return weight > 0n ? 100 : 0;
+    const totalAfter = networkTotal + weight;
+    if (totalAfter === 0n) return 0;
+    return Number((weight * 10000n) / totalAfter) / 100;
+  }, [weight, networkTotal]);
+
+  // Conflict check (FRONTEND.md §11.5.2)
+  const conflictMessage = useMemo<string | null>(() => {
+    if (!userCommits) return null;
+    const has = userCommits;
+    if (has.agentGuardian) {
+      return "You have an active AgentGuardian. Cancel it before creating any other commitment.";
+    }
+    if (type === "AgentGuardian" && (has.noSell.length || has.holdAbove.length || has.noTradeWindow.length)) {
+      return "AgentGuardian requires no other active commitments. Cancel them first.";
+    }
+    if (type === "NoSell" || type === "HoldAbove") {
+      if (!targetMint) return null;
+      const same = (c: { targetMint: string }) => c.targetMint === targetMint;
+      const conflictNoSell = has.noSell.find(same);
+      const conflictHoldAbove = has.holdAbove.find(same);
+      if (type === "NoSell" && conflictNoSell) return "You already have a NoSell on this token.";
+      if (type === "HoldAbove" && conflictHoldAbove) return "You already have a HoldAbove on this token.";
+      if (type === "HoldAbove" && conflictNoSell) {
+        return "NoSell on this token already covers HoldAbove. Cancel NoSell to downgrade.";
+      }
+    }
+    return null;
+  }, [userCommits, type, targetMint]);
+
+  // Local time preview for NoTradeWindow
+  const windowLocalPreview = useMemo(() => {
+    if (type !== "NoTradeWindow") return null;
+    const s = parseInt(windowStart, 10);
+    const e = parseInt(windowEnd, 10);
+    if (isNaN(s) || isNaN(e)) return null;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const offsetH = -new Date().getTimezoneOffset() / 60;
+    const ls = ((s + offsetH) % 24 + 24) % 24;
+    const le = ((e + offsetH) % 24 + 24) % 24;
+    return `Local (${tz}): ${String(ls).padStart(2, "0")}:00 → ${String(le).padStart(2, "0")}:00${ls > le ? " (crosses midnight)" : ""}`;
+  }, [type, windowStart, windowEnd]);
+
+  const canSubmit = !!signer && !conflictMessage && !isSending;
+
+  async function handleSubmit() {
+    if (!signer) {
+      toast.error("Connect wallet first");
       return;
     }
-
-    // Compute duration_secs (required by contract, min 86400)
-    let durationSecs: number;
-    if (form.commitmentType === "HoldUntil") {
-      const unlockTs = parseInt(form.unlockAt, 10);
-      if (!unlockTs || unlockTs <= Math.floor(Date.now() / 1000)) {
-        toast.error("Please select a future unlock date.");
-        return;
-      }
-      durationSecs = Math.max(86400, unlockTs - Math.floor(Date.now() / 1000));
-    } else {
-      const days = parseFloat(form.durationDays);
-      if (isNaN(days) || days < 1) {
-        toast.error("Duration must be at least 1 day.");
-        return;
-      }
-      durationSecs = Math.round(days * 86400);
-    }
-
-    // HoldAbove: threshold must be a positive number
-    if (form.commitmentType === "HoldAbove") {
-      const threshold = parseFloat(form.threshold);
-      if (isNaN(threshold) || threshold <= 0) {
-        toast.error("HoldAbove threshold must be greater than zero.");
-        return;
-      }
-    }
-
-    // NoTradeWindow: hours must be valid 0-23 integers and must differ
-    if (form.commitmentType === "NoTradeWindow") {
-      const sh = parseInt(form.startHour, 10);
-      const eh = parseInt(form.endHour, 10);
-      if (isNaN(sh) || isNaN(eh) || sh < 0 || sh > 23 || eh < 0 || eh > 23) {
-        toast.error("Window hours must be between 0 and 23.");
-        return;
-      }
-      if (sh === eh) {
-        toast.error("Start and end hours must be different.");
-        return;
-      }
-    }
-
-    setIsProcessing(true);
-
     try {
-      // ── Step 1: Call POST /api/commitment/create, expect 402 ──────────────
+      const stakeLamports = BigInt(Math.floor(parseFloat(stakeSol) * 1e9));
+      if (stakeLamports < 10_000_000n) throw new Error("Minimum stake is 0.01 SOL");
+      const days = parseInt(durationDays, 10);
+      if (!days || days < 1 || days > 365) throw new Error("Duration must be 1-365 days");
 
-      toast.loading("Checking payment requirement...", { id: "commitment" });
-
-      const initRes = await fetch("/api/commitment/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          owner: walletAddress,
-          targetMint: targetMintStr,
-          stakeAmountSol: stakeSOL,
-          commitmentType: form.commitmentType,
-        }),
-      });
-
-      if (initRes.status !== 402 && !initRes.ok) {
-        const errBody = await initRes.text();
-        throw new Error(`Server error (${initRes.status}): ${errBody}`);
-      }
-
-      // ── Step 2: Handle 402 — send SOL to treasury ─────────────────────────
-
-      let paymentSig: string | undefined;
-
-      if (initRes.status === 402) {
-        toast.loading("Sending x402 micropayment (0.001 SOL)...", {
-          id: "commitment",
-        });
-
-        const transferIx = buildTransferInstruction(
-          walletAddress,
-          TREASURY,
-          ACTIVATION_FEE_LAMPORTS
-        );
-
-        paymentSig = await send({ instructions: [transferIx] });
-
-        toast.loading("Payment sent! Verifying with server...", {
-          id: "commitment",
-        });
-
-        // ── Step 3: Retry POST with X-Payment header ─────────────────────────
-
-        const retryRes = await fetch("/api/commitment/create", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Payment": btoa(paymentSig),
-          },
-          body: JSON.stringify({
-            owner: walletAddress,
-            targetMint: targetMintStr,
-            stakeAmountSol: stakeSOL,
-            commitmentType: form.commitmentType,
-          }),
-        });
-
-        if (!retryRes.ok) {
-          const errBody = await retryRes.text();
-          throw new Error(`Payment verification failed (${retryRes.status}): ${errBody}`);
+      let ix;
+      switch (type) {
+        case "NoSell": {
+          if (!targetMint) throw new Error("Target mint required");
+          ix = await getCreateNoSellInstructionAsync({
+            owner: signer,
+            targetMint: address(targetMint),
+            stakeAmount: stakeLamports,
+            durationDays: days,
+          });
+          break;
         }
-
-        const retryData = (await retryRes.json()) as { authorized?: boolean };
-        if (!retryData.authorized) {
-          throw new Error("Server did not authorize the commitment. Check payment.");
+        case "HoldAbove": {
+          if (!targetMint) throw new Error("Target mint required");
+          const floorBig = BigInt(Math.floor(parseFloat(floorAmount || "0")));
+          if (floorBig <= 0n) throw new Error("Floor amount required");
+          ix = await getCreateHoldAboveInstructionAsync({
+            owner: signer,
+            targetMint: address(targetMint),
+            stakeAmount: stakeLamports,
+            durationDays: days,
+            floorAmount: floorBig,
+          });
+          break;
+        }
+        case "NoTradeWindow": {
+          const sh = parseInt(windowStart, 10);
+          const eh = parseInt(windowEnd, 10);
+          if (sh < 0 || sh > 23 || eh < 0 || eh > 23) throw new Error("Hours must be 0-23");
+          if (sh === eh) throw new Error("Window cannot be 0 hours");
+          const nonce = BigInt(Date.now());
+          ix = await getCreateNoTradeWindowInstructionAsync({
+            owner: signer,
+            stakeAmount: stakeLamports,
+            durationDays: days,
+            windowStartHour: sh,
+            windowEndHour: eh,
+            nonce,
+          });
+          break;
+        }
+        case "AgentGuardian": {
+          if (!guardian) throw new Error("Guardian pubkey required");
+          ix = await getCreateAgentGuardianInstructionAsync({
+            owner: signer,
+            stakeAmount: stakeLamports,
+            durationDays: days,
+            guardianPubkey: address(guardian) as Address,
+          });
+          break;
         }
       }
-
-      // ── Step 4: Build + send create_commitment instruction ────────────────
-
-      toast.loading("Deriving PDAs...", { id: "commitment" });
-
-      const commitmentPda = await deriveCommitmentPda(walletAddress, targetMintAddr);
-      const vaultPda = await deriveVaultPda(commitmentPda);
-      const protocolStatePda = await deriveProtocolStatePda();
-
-      const stakeLamports = BigInt(Math.round(stakeSOL * 1_000_000_000));
-      const commitmentTypeBytes = encodeCommitmentType(
-        form.commitmentType,
-        form.threshold,
-        form.unlockAt,
-        form.startHour,
-        form.endHour
-      );
-
-      const createIx = buildCreateCommitmentInstruction(
-        walletAddress,
-        targetMintAddr,
-        commitmentTypeBytes,
-        stakeLamports,
-        durationSecs,
-        null, // no guardian for now
-        commitmentPda,
-        vaultPda,
-        protocolStatePda
-      );
-
-      toast.loading("Sending create_commitment transaction...", {
-        id: "commitment",
-      });
-
-      const txSig = await send({ instructions: [createIx] });
-
-      // ── Step 5: Success ───────────────────────────────────────────────────
-
-      toast.success("Commitment created!", {
-        id: "commitment",
-        description: (
-          <a
-            href={getExplorerUrl(`/tx/${txSig}`)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline"
-          >
-            View transaction
-          </a>
-        ),
-      });
-
-      setForm(DEFAULT_FORM);
-    } catch (err) {
-      console.error("CreateCommitment failed:", err);
-      toast.error(
-        err instanceof Error ? err.message : "An unexpected error occurred.",
-        { id: "commitment" }
-      );
-    } finally {
-      setIsProcessing(false);
+      const sig = await send({ instructions: [ix] });
+      toast.success(`Commitment created: ${sig.slice(0, 8)}…`);
+      userCommits.refresh?.();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg);
     }
-  }, [walletAddress, signer, form, send, getExplorerUrl]);
-
-  const busy = isSending || isProcessing;
-
-  // ─── Not connected ─────────────────────────────────────────────────────────
-
-  if (status !== "connected") {
-    return (
-      <section className="w-full space-y-4 rounded-2xl border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]">
-        <div className="space-y-1">
-          <p className="text-lg font-semibold">Create Commitment</p>
-          <p className="text-sm text-muted">
-            Connect your wallet to stake SOL and commit to a trading restriction.
-          </p>
-        </div>
-        <div className="rounded-lg bg-cream/50 p-4 text-center text-sm text-muted">
-          Wallet not connected
-        </div>
-      </section>
-    );
   }
 
-  // ─── Main form ─────────────────────────────────────────────────────────────
-
   return (
-    <section className="w-full space-y-5 rounded-2xl border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]">
-      {/* Header */}
-      <div className="space-y-1">
-        <p className="text-lg font-semibold">Create Commitment</p>
-        <p className="text-sm text-muted">
-          Stake SOL and commit to NOT trading a specific token. Violators get
-          slashed; compliant stakers earn yield.
-        </p>
-      </div>
+    <div className="rounded-xl p-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <h3 className="text-lg font-bold mb-4" style={{ color: "var(--gold)" }}>
+        Create Commitment
+      </h3>
 
-      {/* Target Mint */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium uppercase tracking-wide text-muted">
-          Target Mint Address
-        </label>
-        <input
-          type="text"
-          placeholder="Token mint you are committing to avoid"
-          value={form.targetMint}
-          onChange={(e) => setField("targetMint", e.target.value)}
-          disabled={busy}
-          className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 font-mono text-sm outline-none transition placeholder:text-muted/60 focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
-        />
-      </div>
-
-      {/* Stake Amount */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium uppercase tracking-wide text-muted">
-          Stake Amount (SOL)
-        </label>
-        <input
-          type="number"
-          min="0.001"
-          step="0.001"
-          placeholder="e.g. 0.05"
-          value={form.stakeAmountSol}
-          onChange={(e) => setField("stakeAmountSol", e.target.value)}
-          disabled={busy}
-          className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition placeholder:text-muted/60 focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
-        />
-      </div>
-
-      {/* Commitment Type */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium uppercase tracking-wide text-muted">
-          Commitment Type
-        </label>
+      {/* Type */}
+      <Field label="COMMITMENT TYPE">
         <select
-          value={form.commitmentType}
-          onChange={(e) =>
-            setField("commitmentType", e.target.value as CommitmentTypeKey)
-          }
-          disabled={busy}
-          className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
+          value={type}
+          onChange={(e) => setType(e.target.value as CommitmentTypeKey)}
+          className="w-full px-3 py-2 rounded"
+          style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
         >
-          <option value="NoBuy">NoBuy — never buy this token</option>
-          <option value="NoSell">NoSell — never sell this token</option>
-          <option value="HoldAbove">HoldAbove — keep balance above threshold</option>
-          <option value="HoldUntil">HoldUntil — hold until a specific time</option>
-          <option value="NoTradeWindow">NoTradeWindow — no trading in a daily window</option>
+          {(Object.keys(TYPE_LABELS) as CommitmentTypeKey[]).map((k) => (
+            <option key={k} value={k}>{TYPE_LABELS[k]}</option>
+          ))}
         </select>
-      </div>
+      </Field>
 
-      {/* Type-specific parameters */}
-      {form.commitmentType === "HoldAbove" && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium uppercase tracking-wide text-muted">
-            Minimum Balance Threshold (SOL)
-          </label>
+      {/* Target / per-type fields */}
+      {(type === "NoSell" || type === "HoldAbove") && (
+        <Field label="TARGET MINT ADDRESS">
           <input
-            type="number"
-            min="0"
-            step="0.001"
-            placeholder="e.g. 1.0"
-            value={form.threshold}
-            onChange={(e) => setField("threshold", e.target.value)}
-            disabled={busy}
-            className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition placeholder:text-muted/60 focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
+            value={targetMint}
+            onChange={(e) => setTargetMint(e.target.value.trim())}
+            placeholder="Mint pubkey"
+            className="w-full px-3 py-2 rounded font-mono text-sm"
+            style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
           />
-        </div>
+        </Field>
       )}
-
-      {form.commitmentType === "HoldUntil" && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium uppercase tracking-wide text-muted">
-            Unlock Date &amp; Time
-          </label>
+      {type === "HoldAbove" && (
+        <Field label="FLOOR AMOUNT (raw token units, must be > 0 and ≤ baseline)">
           <input
-            type="datetime-local"
-            value={form.unlockAt}
-            onChange={(e) => {
-              const ts = e.target.value
-                ? Math.floor(new Date(e.target.value).getTime() / 1000).toString()
-                : "";
-              setField("unlockAt", ts);
-            }}
-            disabled={busy}
-            className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
+            value={floorAmount}
+            onChange={(e) => setFloorAmount(e.target.value.trim())}
+            placeholder="e.g. 100000"
+            className="w-full px-3 py-2 rounded"
+            style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
           />
-          {form.unlockAt && (
-            <p className="text-xs text-muted">
-              Unix timestamp: {form.unlockAt}
-            </p>
+        </Field>
+      )}
+      {type === "NoTradeWindow" && (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="WINDOW START HOUR (UTC, 0-23)">
+              <input
+                value={windowStart}
+                onChange={(e) => setWindowStart(e.target.value.trim())}
+                className="w-full px-3 py-2 rounded"
+                style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+              />
+            </Field>
+            <Field label="WINDOW END HOUR (UTC, exclusive)">
+              <input
+                value={windowEnd}
+                onChange={(e) => setWindowEnd(e.target.value.trim())}
+                className="w-full px-3 py-2 rounded"
+                style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+              />
+            </Field>
+          </div>
+          {windowLocalPreview && (
+            <div className="text-xs mb-3" style={{ color: "var(--muted)" }}>{windowLocalPreview}</div>
           )}
+        </>
+      )}
+      {type === "AgentGuardian" && (
+        <Field label="GUARDIAN PUBKEY (only this key may move funds)">
+          <input
+            value={guardian}
+            onChange={(e) => setGuardian(e.target.value.trim())}
+            placeholder="Guardian wallet address"
+            className="w-full px-3 py-2 rounded font-mono text-sm"
+            style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+          />
+        </Field>
+      )}
+
+      {/* Duration */}
+      <Field label="DURATION (DAYS)">
+        <div className="flex gap-2 mb-2 flex-wrap">
+          {DURATION_PRESETS.map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => setDurationDays(String(d))}
+              className="px-3 py-1 rounded text-xs"
+              style={{
+                background: durationDays === String(d) ? "var(--gold)" : "var(--input)",
+                color: durationDays === String(d) ? "var(--background)" : "var(--foreground)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              {d}d
+            </button>
+          ))}
+          <input
+            value={durationDays}
+            onChange={(e) => setDurationDays(e.target.value.trim())}
+            className="flex-1 min-w-[80px] px-3 py-1 rounded text-sm"
+            style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+          />
+        </div>
+      </Field>
+
+      {/* Stake */}
+      <Field label="STAKE AMOUNT (SOL, ≥ 0.01)">
+        <input
+          value={stakeSol}
+          onChange={(e) => setStakeSol(e.target.value.trim())}
+          className="w-full px-3 py-2 rounded"
+          style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+        />
+        <div className="text-xs mt-2" style={{ color: "var(--muted)" }}>
+          Your weight: <span style={{ color: "var(--gold)" }}>{weight.toString()}</span> · Network total:{" "}
+          {networkTotal.toString()} · Your share:{" "}
+          <span style={{ color: "var(--gold)" }}>{sharePct.toFixed(2)}%</span>
+        </div>
+      </Field>
+
+      {conflictMessage && (
+        <div className="text-sm mb-3 px-3 py-2 rounded" style={{ background: "rgba(220,38,38,0.1)", color: "#fca5a5", border: "1px solid rgba(220,38,38,0.4)" }}>
+          ⚠ {conflictMessage}
         </div>
       )}
 
-      {form.commitmentType === "NoTradeWindow" && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted">
-              Window Start Hour (0–23)
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="23"
-              step="1"
-              value={form.startHour}
-              onChange={(e) => setField("startHour", e.target.value)}
-              disabled={busy}
-              className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted">
-              Window End Hour (0–23)
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="23"
-              step="1"
-              value={form.endHour}
-              onChange={(e) => setField("endHour", e.target.value)}
-              disabled={busy}
-              className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Duration (not shown for HoldUntil, which uses unlock date instead) */}
-      {form.commitmentType !== "HoldUntil" && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium uppercase tracking-wide text-muted">
-            Duration (days)
-          </label>
-          <div className="flex gap-2 flex-wrap">
-            {(DURATION_OPTIONS[form.commitmentType] ?? []).map((opt) => (
-              <button
-                key={opt.days}
-                type="button"
-                onClick={() => setField("durationDays", String(opt.days))}
-                disabled={busy}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition border disabled:pointer-events-none disabled:opacity-50 ${
-                  form.durationDays === String(opt.days)
-                    ? "border-foreground/40 bg-foreground/10 text-foreground"
-                    : "border-border-low bg-card text-muted hover:border-foreground/20"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={form.durationDays}
-              onChange={(e) => setField("durationDays", e.target.value)}
-              disabled={busy}
-              className="w-20 rounded-md border border-border-low bg-card px-3 py-1.5 text-xs outline-none transition focus:border-foreground/30 disabled:pointer-events-none disabled:opacity-50"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* x402 info banner */}
-      <div className="rounded-lg border border-border-low bg-cream/30 px-4 py-3 text-xs text-muted">
-        <span className="font-semibold text-foreground/80">x402 payment required:</span>{" "}
-        Creating a commitment costs{" "}
-        <span className="font-semibold text-foreground/80">0.001 SOL</span> paid to
-        the protocol treasury. This is verified server-side before the on-chain
-        instruction is authorised.
-      </div>
-
-      {/* Submit */}
       <button
         onClick={handleSubmit}
-        disabled={busy || !form.targetMint.trim()}
-        className="w-full rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-xs transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+        disabled={!canSubmit}
+        className="w-full py-2.5 rounded font-bold text-sm transition-opacity"
+        style={{
+          background: "var(--gold)",
+          color: "var(--background)",
+          opacity: canSubmit ? 1 : 0.4,
+          cursor: canSubmit ? "pointer" : "not-allowed",
+        }}
       >
-        {busy ? "Processing..." : "Create Commitment"}
+        {isSending ? "Submitting…" : "Create Commitment"}
       </button>
-    </section>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-[10px] font-bold mb-1.5" style={{ color: "var(--muted)", letterSpacing: "0.1em" }}>
+        {label}
+      </label>
+      {children}
+    </div>
   );
 }

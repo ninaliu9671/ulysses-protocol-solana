@@ -14,7 +14,7 @@ export function NavBar() {
       }}
     >
       {/* Logo */}
-      <a href="#" className="flex items-center gap-3 select-none">
+      <a href="/" className="flex items-center gap-3 select-none">
         <div
           className="flex items-center justify-center w-9 h-9 rounded-full"
           style={{ border: "1.5px solid var(--gold)" }}
@@ -40,16 +40,13 @@ export function NavBar() {
       {/* Nav links */}
       <nav className="hidden md:flex items-center gap-8">
         {[
-          { label: "Home", href: "#hero" },
-          { label: "How it Works", href: "#how-it-works" },
-          { label: "Leaderboard", href: "#leaderboard" },
-          { label: "Docs", href: "https://github.com", target: "_blank" },
+          { label: "Home", href: "/" },
+          { label: "Commitment", href: "/commitment" },
+          { label: "Leaderboard", href: "/leaderboard" },
         ].map((item) => (
           <a
             key={item.label}
             href={item.href}
-            target={item.target}
-            rel={item.target ? "noopener noreferrer" : undefined}
             style={{
               fontSize: 13,
               color: "var(--muted)",

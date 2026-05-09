@@ -1,128 +1,118 @@
 "use client";
 
 import useSWR from "swr";
-import {
-  fetchWatcherHistory,
-  shortAddr,
-  lamportsToSol,
-  timeAgo,
-  parseCommitmentType,
-  fetchWatcherCommitments,
-  type WatcherSlashEvent,
-} from "../lib/watcher";
+import { useCluster } from "./cluster-context";
+import { getClusterUrl } from "../lib/solana-client";
+import { rpcCall } from "../lib/rpc";
+import { VAULT_PROGRAM_ADDRESS } from "../generated/vault";
 
-// Enrich slash events with commitment_type from commitments table
-async function fetchSlashesWithType() {
-  const [history, commitments] = await Promise.all([
-    fetchWatcherHistory(),
-    fetchWatcherCommitments(),
-  ]);
-  const typeMap = new Map(commitments.map((c) => [c.pubkey, c.commitment_type]));
-  return history.slice(0, 10).map((s) => ({
-    ...s,
-    commitmentTypeRaw: typeMap.get(s.pubkey) ?? '{"type":"Unknown"}',
-  }));
+type SignatureInfo = {
+  signature: string;
+  blockTime: number | null;
+  err: unknown;
+};
+
+type TxMeta = {
+  meta: { logMessages?: string[] | null } | null;
+  blockTime: number | null;
+};
+
+type SlashEvent = {
+  signature: string;
+  blockTime: number | null;
+  type: string;
+  owner: string;
+  principal: number;
+};
+
+function shortAddr(a: string): string {
+  return `${a.slice(0, 4)}…${a.slice(-4)}`;
 }
 
-export function SirenGraveyardSection() {
-  const { data: slashes, isLoading } = useSWR(
-    "watcher-history",
-    fetchSlashesWithType,
-    { refreshInterval: 30_000 }
+function relativeTime(ts: number | null): string {
+  if (!ts) return "—";
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+async function fetchRecentSlashes(rpcUrl: string, limit: number): Promise<SlashEvent[]> {
+  const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
+    VAULT_PROGRAM_ADDRESS,
+    { limit: 200 },
+  ]);
+  if (!sigs?.length) return [];
+
+  const events: SlashEvent[] = [];
+  for (let i = 0; i < sigs.length && events.length < limit; i += 10) {
+    const batch = sigs.slice(i, i + 10);
+    const txs = await Promise.all(
+      batch.map((s) =>
+        rpcCall<TxMeta>(rpcUrl, "getTransaction", [
+          s.signature,
+          { encoding: "json", maxSupportedTransactionVersion: 0 },
+        ]).catch(() => null),
+      ),
+    );
+    txs.forEach((tx, j) => {
+      if (!tx?.meta?.logMessages) return;
+      const logs = tx.meta.logMessages;
+      const slashLog = logs.find((l) => l.includes("Slashed"));
+      if (!slashLog) return;
+      const ownerMatch = slashLog.match(/owner[=:\s]+([1-9A-HJ-NP-Za-km-z]{32,44})/);
+      const typeMatch = slashLog.match(/(NoSell|HoldAbove|NoTradeWindow|AgentGuardian)/);
+      const principalMatch = slashLog.match(/principal[=:\s]+(\d+)/);
+      events.push({
+        signature: batch[j].signature,
+        blockTime: tx.blockTime,
+        type: typeMatch?.[1] ?? "?",
+        owner: ownerMatch?.[1] ?? "",
+        principal: principalMatch ? Number(principalMatch[1]) / 1e9 : 0,
+      });
+    });
+  }
+  return events.slice(0, limit);
+}
+
+export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
+  const { cluster } = useCluster();
+  const url = getClusterUrl(cluster);
+  const { data, isLoading } = useSWR(
+    ["siren-graveyard", url, limit],
+    () => fetchRecentSlashes(url, limit),
+    { refreshInterval: 30_000 },
   );
 
   return (
-    <div className="card-ulysses p-6 flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-3" style={{ borderBottom: "1px solid rgba(239,68,68,0.2)" }}>
-        <div className="flex items-center gap-2">
-          <div
-            className="w-2 h-2 rounded-full"
-            style={{ background: "#ef4444", boxShadow: "0 0 6px #ef4444" }}
-          />
-          <span className="section-label" style={{ color: "#ef4444" }}>
-            Siren Graveyard
-          </span>
-        </div>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>Those who broke their vow.</span>
+    <div className="rounded-xl p-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: "1px solid var(--border)" }}>
+        <h3 className="text-lg font-bold" style={{ color: "var(--gold)" }}>Siren Graveyard</h3>
+        <span className="text-xs" style={{ color: "var(--muted)" }}>Recent slashes</span>
       </div>
-
-      {/* Content */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <p style={{ fontSize: 13, color: "var(--muted)" }}>Loading slash history…</p>
-        </div>
-      ) : !slashes || slashes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-8 gap-2">
-          <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center" }}>
-            No slashes yet.
-            <br />
-            <span style={{ fontSize: 11 }}>Compliant stakers earn yield when someone breaks their vow.</span>
-          </p>
-        </div>
+        <p className="text-sm" style={{ color: "var(--muted)" }}>Scanning chain…</p>
+      ) : !data || data.length === 0 ? (
+        <p className="text-sm" style={{ color: "var(--muted)" }}>No slashes recorded yet.</p>
       ) : (
-        <div className="flex flex-col gap-3">
-          {slashes.map((s) => {
-            const ct = parseCommitmentType(s.commitmentTypeRaw);
-            return (
-              <div
-                key={s.id}
-                className="rounded p-4"
-                style={{
-                  background: "rgba(239,68,68,0.04)",
-                  border: "1px solid rgba(239,68,68,0.12)",
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="flex items-center justify-center w-8 h-8 rounded-full mt-0.5 flex-shrink-0"
-                      style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)" }}
-                    >
-                      <SkullIcon />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--foreground)", fontWeight: 600 }}>
-                          {shortAddr(s.owner)}
-                        </span>
-                        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                          violated{" "}
-                          <span style={{ color: "#ef4444", fontWeight: 700 }}>{ct.type}</span>
-                        </span>
-                        <span className="badge-slashed">SLASHED</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, fontFamily: "monospace" }}>
-                        {shortAddr(s.target_mint)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#ef4444" }}>
-                      −{lamportsToSol(s.amount).toFixed(4)} SOL
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                      {timeAgo(s.slashed_at)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        <div className="space-y-2">
+          <div className="grid grid-cols-12 gap-2 text-[10px] font-bold pb-2" style={{ color: "var(--muted)", letterSpacing: "0.1em", borderBottom: "1px solid var(--border)" }}>
+            <div className="col-span-3">TIME</div>
+            <div className="col-span-3">USER</div>
+            <div className="col-span-3">TYPE</div>
+            <div className="col-span-3 text-right">LOSS (SOL)</div>
+          </div>
+          {data.map((e) => (
+            <div key={e.signature} className="grid grid-cols-12 gap-2 text-xs py-1.5" style={{ color: "var(--foreground)" }}>
+              <div className="col-span-3" style={{ color: "var(--muted)" }}>{relativeTime(e.blockTime)}</div>
+              <div className="col-span-3 font-mono">{e.owner ? shortAddr(e.owner) : "—"}</div>
+              <div className="col-span-3">{e.type}</div>
+              <div className="col-span-3 text-right" style={{ color: "#fca5a5" }}>−{e.principal.toFixed(4)}</div>
+            </div>
+          ))}
         </div>
       )}
     </div>
-  );
-}
-
-function SkullIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2a9 9 0 0 1 9 9c0 3.18-1.65 5.97-4.13 7.58L16 22H8l-.87-3.42A9 9 0 0 1 12 2z" />
-      <path d="M9 17v1" />
-      <path d="M15 17v1" />
-      <circle cx="9" cy="12" r="1.5" fill="#ef4444" stroke="none" />
-      <circle cx="15" cy="12" r="1.5" fill="#ef4444" stroke="none" />
-    </svg>
   );
 }
