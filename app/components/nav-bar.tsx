@@ -1,0 +1,74 @@
+"use client";
+
+import { WalletButton } from "./wallet-button";
+import { ClusterSelect } from "./cluster-select";
+
+export function NavBar() {
+  return (
+    <header
+      className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-4"
+      style={{
+        background: "rgba(12, 11, 9, 0.92)",
+        backdropFilter: "blur(12px)",
+        borderBottom: "1px solid rgba(201,169,110,0.1)",
+      }}
+    >
+      {/* Logo */}
+      <a href="#" className="flex items-center gap-3 select-none">
+        <div
+          className="flex items-center justify-center w-9 h-9 rounded-full"
+          style={{ border: "1.5px solid var(--gold)" }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="3" fill="var(--gold)" />
+            <line x1="12" y1="1" x2="12" y2="5" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="12" y1="19" x2="12" y2="23" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="1" y1="12" x2="5" y2="12" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="19" y1="12" x2="23" y2="12" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="4.22" y1="4.22" x2="7.05" y2="7.05" stroke="var(--gold)" strokeWidth="1.2" strokeLinecap="round" />
+            <line x1="16.95" y1="16.95" x2="19.78" y2="19.78" stroke="var(--gold)" strokeWidth="1.2" strokeLinecap="round" />
+            <line x1="4.22" y1="19.78" x2="7.05" y2="16.95" stroke="var(--gold)" strokeWidth="1.2" strokeLinecap="round" />
+            <line x1="16.95" y1="7.05" x2="19.78" y2="4.22" stroke="var(--gold)" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+        </div>
+        <div className="leading-tight">
+          <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: "0.12em", color: "var(--gold)" }}>ULYSSES</div>
+          <div style={{ fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", color: "var(--muted)" }}>PROTOCOL</div>
+        </div>
+      </a>
+
+      {/* Nav links */}
+      <nav className="hidden md:flex items-center gap-8">
+        {[
+          { label: "Home", href: "#hero" },
+          { label: "How it Works", href: "#how-it-works" },
+          { label: "Leaderboard", href: "#leaderboard" },
+          { label: "Docs", href: "https://github.com", target: "_blank" },
+        ].map((item) => (
+          <a
+            key={item.label}
+            href={item.href}
+            target={item.target}
+            rel={item.target ? "noopener noreferrer" : undefined}
+            style={{
+              fontSize: 13,
+              color: "var(--muted)",
+              fontWeight: 500,
+              transition: "color 0.15s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--foreground)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}
+          >
+            {item.label}
+          </a>
+        ))}
+      </nav>
+
+      {/* Right controls */}
+      <div className="flex items-center gap-3">
+        <ClusterSelect />
+        <WalletButton />
+      </div>
+    </header>
+  );
+}

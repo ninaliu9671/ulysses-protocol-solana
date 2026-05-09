@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Ulysses Protocol — Dark Gold Theme (always dark) ── */
+:root {
+  --background: #0c0b09;
+  --foreground: #e8dcc8;
+  --primary: #c9a96e;
+  --primary-foreground: #0c0b09;
+  --muted: #7c7063;
+  --muted-foreground: #5c5348;
+  --card: #131109;
+  --card-foreground: #e8dcc8;
+  --card-elevated: #1a1710;
+  --popover: #1a1710;
+  --popover-foreground: #e8dcc8;
+  --border: rgba(201, 169, 110, 0.18);
+  --border-low: rgba(201, 169, 110, 0.08);
+  --border-strong: rgba(201, 169, 110, 0.35);
+  --input: #1a1710;
+  --accent: #1a1710;
+  --accent-foreground: #e8dcc8;
+  --gold: #c9a96e;
+  --gold-bright: #d4a853;
+  --gold-dim: rgba(201, 169, 110, 0.15);
+  --cream: #1a1710;
+  --destructive: #ef4444;
+  --destructive-foreground: #fca5a5;
+  --yield-green: #4ade80;
+  --slash-red: #ef4444;
+  --ring: #c9a96e;
+  --radius: 0.5rem;
+  --secondary: #1a1710;
+  --secondary-foreground: #e8dcc8;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: Georgia, "Times New Roman", serif;
+}
+
+/* keep dark variant identical so next-themes dark class still works */
+.dark {
+  --background: #0c0b09;
+  --foreground: #e8dcc8;
+  --primary: #c9a96e;
+  --primary-foreground: #0c0b09;
+  --muted: #7c7063;
+  --muted-foreground: #5c5348;
+  --card: #131109;
+  --card-foreground: #e8dcc8;
+  --popover: #1a1710;
+  --popover-foreground: #e8dcc8;
+  --border: rgba(201, 169, 110, 0.18);
+  --border-low: rgba(201, 169, 110, 0.08);
+  --input: #1a1710;
+  --accent: #1a1710;
+  --accent-foreground: #e8dcc8;
+  --cream: #1a1710;
+  --destructive: #ef4444;
+  --destructive-foreground: #fca5a5;
+  --ring: #c9a96e;
+  --secondary: #1a1710;
+  --secondary-foreground: #e8dcc8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
+  --color-border-low: var(--border-low);
+  --color-input: var(--input);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-cream: var(--cream);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-gold: var(--gold);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-transparent;
+  }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ── Shared utility classes ── */
+.gold-text {
+  color: var(--gold);
+}
+
+.gold-border {
+  border-color: var(--border);
+}
+
+.card-ulysses {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.badge-safe {
+  background: rgba(201, 169, 110, 0.12);
+  color: var(--gold);
+  border: 1px solid rgba(201, 169, 110, 0.3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.badge-slashed {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+.progress-bar-track {
+  background: rgba(201, 169, 110, 0.1);
+  border-radius: 999px;
+  height: 4px;
+  width: 100%;
+}
+
+.progress-bar-fill {
+  background: linear-gradient(90deg, var(--gold), var(--gold-bright));
+  border-radius: 999px;
+  height: 4px;
+}

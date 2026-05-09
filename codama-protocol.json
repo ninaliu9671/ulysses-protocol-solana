@@ -1,0 +1,11 @@
+{
+  "idl": "./anchor/target/idl/ulysses_protocol.json",
+  "scripts": {
+    "js": [
+      {
+        "from": "@codama/renderers-js",
+        "args": ["./app/generated/ulysses-protocol"]
+      }
+    ]
+  }
+}
