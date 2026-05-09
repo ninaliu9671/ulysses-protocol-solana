@@ -10,16 +10,18 @@ import {
   getAddressEncoder,
   getBytesEncoder,
   getProgramDerivedAddress,
+  getU64Encoder,
   type Address,
   type ProgramDerivedAddress,
 } from "@solana/kit";
 
-export type VaultSeeds = {
-  commitment: Address;
+export type CreateNoTradeWindowCommitmentSeeds = {
+  owner: Address;
+  nonce: number | bigint;
 };
 
-export async function findVaultPda(
-  seeds: VaultSeeds,
+export async function findCreateNoTradeWindowCommitmentPda(
+  seeds: CreateNoTradeWindowCommitmentSeeds,
   config: { programAddress?: Address | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
@@ -28,8 +30,11 @@ export async function findVaultPda(
   return await getProgramDerivedAddress({
     programAddress,
     seeds: [
-      getBytesEncoder().encode(new Uint8Array([118, 97, 117, 108, 116])),
-      getAddressEncoder().encode(seeds.commitment),
+      getBytesEncoder().encode(
+        new Uint8Array([110, 111, 95, 116, 114, 97, 100, 101]),
+      ),
+      getAddressEncoder().encode(seeds.owner),
+      getU64Encoder().encode(seeds.nonce),
     ],
   });
 }

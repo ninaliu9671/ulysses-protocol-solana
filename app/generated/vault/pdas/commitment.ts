@@ -14,12 +14,12 @@ import {
   type ProgramDerivedAddress,
 } from "@solana/kit";
 
-export type VaultSeeds = {
-  commitment: Address;
+export type CommitmentSeeds = {
+  owner: Address;
 };
 
-export async function findVaultPda(
-  seeds: VaultSeeds,
+export async function findCommitmentPda(
+  seeds: CommitmentSeeds,
   config: { programAddress?: Address | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
@@ -28,8 +28,10 @@ export async function findVaultPda(
   return await getProgramDerivedAddress({
     programAddress,
     seeds: [
-      getBytesEncoder().encode(new Uint8Array([118, 97, 117, 108, 116])),
-      getAddressEncoder().encode(seeds.commitment),
+      getBytesEncoder().encode(
+        new Uint8Array([97, 103, 101, 110, 116, 95, 103, 117, 97, 114, 100]),
+      ),
+      getAddressEncoder().encode(seeds.owner),
     ],
   });
 }

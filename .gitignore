@@ -51,6 +51,10 @@ next-env.d.ts
 watcher/watcher-state.json
 watcher/watcher.db*
 
+# watcher runtime state
+watcher/watcher-state.json
+watcher/watcher.db*
+
 # anchor build artifacts
 /anchor/.anchor/
 /anchor/target/

@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useSWRConfig } from "swr";
 import type { Instruction } from "@solana/kit";
 import { createClient } from "@solana/kit-client-rpc";
+import { getSetComputeUnitLimitInstruction } from "@solana-program/compute-budget";
 import { useWallet } from "../wallet/context";
 import { useCluster } from "../../components/cluster-context";
 import { getClusterUrl, getClusterWsConfig } from "../solana-client";
@@ -32,7 +33,8 @@ export function useSendTransaction() {
 
       setIsSending(true);
       try {
-        const result = await txClient.sendTransaction([...instructions]);
+        const computeBudgetIx = getSetComputeUnitLimitInstruction({ units: 400_000 });
+        const result = await txClient.sendTransaction([computeBudgetIx, ...instructions]);
         mutate((key: unknown) => Array.isArray(key) && key[0] === "balance");
         return result.context.signature;
       } finally {

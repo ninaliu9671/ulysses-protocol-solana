@@ -17,18 +17,135 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 import {
-  parseDepositInstruction,
-  parseWithdrawInstruction,
-  type ParsedDepositInstruction,
-  type ParsedWithdrawInstruction,
+  parseCancelAgentGuardianInstruction,
+  parseCancelHoldAboveInstruction,
+  parseCancelNoSellInstruction,
+  parseCancelNoTradeWindowInstruction,
+  parseClaimAgentGuardianInstruction,
+  parseClaimHoldAboveInstruction,
+  parseClaimNoSellInstruction,
+  parseClaimNoTradeWindowInstruction,
+  parseCreateAgentGuardianInstruction,
+  parseCreateHoldAboveInstruction,
+  parseCreateNoSellInstruction,
+  parseCreateNoTradeWindowInstruction,
+  parseInitializeInstruction,
+  parseSlashAgentGuardianInstruction,
+  parseSlashHoldAboveInstruction,
+  parseSlashNoSellInstruction,
+  parseSlashNoTradeWindowInstruction,
+  type ParsedCancelAgentGuardianInstruction,
+  type ParsedCancelHoldAboveInstruction,
+  type ParsedCancelNoSellInstruction,
+  type ParsedCancelNoTradeWindowInstruction,
+  type ParsedClaimAgentGuardianInstruction,
+  type ParsedClaimHoldAboveInstruction,
+  type ParsedClaimNoSellInstruction,
+  type ParsedClaimNoTradeWindowInstruction,
+  type ParsedCreateAgentGuardianInstruction,
+  type ParsedCreateHoldAboveInstruction,
+  type ParsedCreateNoSellInstruction,
+  type ParsedCreateNoTradeWindowInstruction,
+  type ParsedInitializeInstruction,
+  type ParsedSlashAgentGuardianInstruction,
+  type ParsedSlashHoldAboveInstruction,
+  type ParsedSlashNoSellInstruction,
+  type ParsedSlashNoTradeWindowInstruction,
 } from "../instructions";
 
 export const VAULT_PROGRAM_ADDRESS =
-  "5ahewo5SgzMyWN2byK5PraBZm85ayuvM8KxAEFoFwh9y" as Address<"5ahewo5SgzMyWN2byK5PraBZm85ayuvM8KxAEFoFwh9y">;
+  "3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S" as Address<"3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S">;
+
+export enum VaultAccount {
+  AgentGuardianCommitment,
+  HoldAboveCommitment,
+  NoSellCommitment,
+  NoTradeWindowCommitment,
+  RewardPool,
+}
+
+export function identifyVaultAccount(
+  account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
+): VaultAccount {
+  const data = "data" in account ? account.data : account;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([222, 194, 193, 96, 53, 240, 191, 6]),
+      ),
+      0,
+    )
+  ) {
+    return VaultAccount.AgentGuardianCommitment;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([136, 52, 202, 39, 186, 119, 46, 155]),
+      ),
+      0,
+    )
+  ) {
+    return VaultAccount.HoldAboveCommitment;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([47, 79, 167, 232, 31, 32, 103, 159]),
+      ),
+      0,
+    )
+  ) {
+    return VaultAccount.NoSellCommitment;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([104, 240, 27, 63, 223, 2, 186, 99]),
+      ),
+      0,
+    )
+  ) {
+    return VaultAccount.NoTradeWindowCommitment;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([134, 121, 197, 211, 133, 154, 82, 32]),
+      ),
+      0,
+    )
+  ) {
+    return VaultAccount.RewardPool;
+  }
+  throw new Error(
+    "The provided account could not be identified as a vault account.",
+  );
+}
 
 export enum VaultInstruction {
-  Deposit,
-  Withdraw,
+  CancelAgentGuardian,
+  CancelHoldAbove,
+  CancelNoSell,
+  CancelNoTradeWindow,
+  ClaimAgentGuardian,
+  ClaimHoldAbove,
+  ClaimNoSell,
+  ClaimNoTradeWindow,
+  CreateAgentGuardian,
+  CreateHoldAbove,
+  CreateNoSell,
+  CreateNoTradeWindow,
+  Initialize,
+  SlashAgentGuardian,
+  SlashHoldAbove,
+  SlashNoSell,
+  SlashNoTradeWindow,
 }
 
 export function identifyVaultInstruction(
@@ -39,23 +156,188 @@ export function identifyVaultInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([242, 35, 198, 137, 82, 225, 242, 182]),
+        new Uint8Array([90, 161, 0, 61, 73, 110, 176, 79]),
       ),
       0,
     )
   ) {
-    return VaultInstruction.Deposit;
+    return VaultInstruction.CancelAgentGuardian;
   }
   if (
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([183, 18, 70, 156, 148, 109, 161, 34]),
+        new Uint8Array([240, 195, 26, 235, 47, 135, 143, 50]),
       ),
       0,
     )
   ) {
-    return VaultInstruction.Withdraw;
+    return VaultInstruction.CancelHoldAbove;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([47, 42, 4, 228, 218, 241, 71, 230]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.CancelNoSell;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([252, 37, 60, 109, 246, 242, 70, 253]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.CancelNoTradeWindow;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([114, 22, 251, 35, 221, 225, 31, 183]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.ClaimAgentGuardian;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([67, 174, 96, 201, 254, 197, 74, 115]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.ClaimHoldAbove;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([20, 58, 165, 149, 24, 92, 85, 131]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.ClaimNoSell;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([179, 159, 97, 221, 64, 20, 51, 1]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.ClaimNoTradeWindow;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([22, 83, 245, 78, 152, 246, 63, 70]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.CreateAgentGuardian;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([235, 155, 148, 63, 69, 58, 49, 33]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.CreateHoldAbove;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([159, 86, 62, 92, 65, 223, 161, 14]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.CreateNoSell;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([117, 172, 65, 63, 223, 196, 160, 99]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.CreateNoTradeWindow;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([175, 175, 109, 31, 13, 152, 155, 237]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.Initialize;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([125, 8, 127, 167, 254, 198, 46, 74]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SlashAgentGuardian;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([0, 169, 62, 54, 225, 159, 130, 51]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SlashHoldAbove;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([86, 125, 233, 211, 82, 32, 33, 132]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SlashNoSell;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([208, 80, 29, 54, 171, 194, 185, 20]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SlashNoTradeWindow;
   }
   throw new Error(
     "The provided instruction could not be identified as a vault instruction.",
@@ -63,32 +345,182 @@ export function identifyVaultInstruction(
 }
 
 export type ParsedVaultInstruction<
-  TProgram extends string = "5ahewo5SgzMyWN2byK5PraBZm85ayuvM8KxAEFoFwh9y",
+  TProgram extends string = "3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S",
 > =
   | ({
-      instructionType: VaultInstruction.Deposit;
-    } & ParsedDepositInstruction<TProgram>)
+      instructionType: VaultInstruction.CancelAgentGuardian;
+    } & ParsedCancelAgentGuardianInstruction<TProgram>)
   | ({
-      instructionType: VaultInstruction.Withdraw;
-    } & ParsedWithdrawInstruction<TProgram>);
+      instructionType: VaultInstruction.CancelHoldAbove;
+    } & ParsedCancelHoldAboveInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.CancelNoSell;
+    } & ParsedCancelNoSellInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.CancelNoTradeWindow;
+    } & ParsedCancelNoTradeWindowInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.ClaimAgentGuardian;
+    } & ParsedClaimAgentGuardianInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.ClaimHoldAbove;
+    } & ParsedClaimHoldAboveInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.ClaimNoSell;
+    } & ParsedClaimNoSellInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.ClaimNoTradeWindow;
+    } & ParsedClaimNoTradeWindowInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.CreateAgentGuardian;
+    } & ParsedCreateAgentGuardianInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.CreateHoldAbove;
+    } & ParsedCreateHoldAboveInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.CreateNoSell;
+    } & ParsedCreateNoSellInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.CreateNoTradeWindow;
+    } & ParsedCreateNoTradeWindowInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.Initialize;
+    } & ParsedInitializeInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SlashAgentGuardian;
+    } & ParsedSlashAgentGuardianInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SlashHoldAbove;
+    } & ParsedSlashHoldAboveInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SlashNoSell;
+    } & ParsedSlashNoSellInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SlashNoTradeWindow;
+    } & ParsedSlashNoTradeWindowInstruction<TProgram>);
 
 export function parseVaultInstruction<TProgram extends string>(
   instruction: Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array>,
 ): ParsedVaultInstruction<TProgram> {
   const instructionType = identifyVaultInstruction(instruction);
   switch (instructionType) {
-    case VaultInstruction.Deposit: {
+    case VaultInstruction.CancelAgentGuardian: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: VaultInstruction.Deposit,
-        ...parseDepositInstruction(instruction),
+        instructionType: VaultInstruction.CancelAgentGuardian,
+        ...parseCancelAgentGuardianInstruction(instruction),
       };
     }
-    case VaultInstruction.Withdraw: {
+    case VaultInstruction.CancelHoldAbove: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: VaultInstruction.Withdraw,
-        ...parseWithdrawInstruction(instruction),
+        instructionType: VaultInstruction.CancelHoldAbove,
+        ...parseCancelHoldAboveInstruction(instruction),
+      };
+    }
+    case VaultInstruction.CancelNoSell: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.CancelNoSell,
+        ...parseCancelNoSellInstruction(instruction),
+      };
+    }
+    case VaultInstruction.CancelNoTradeWindow: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.CancelNoTradeWindow,
+        ...parseCancelNoTradeWindowInstruction(instruction),
+      };
+    }
+    case VaultInstruction.ClaimAgentGuardian: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.ClaimAgentGuardian,
+        ...parseClaimAgentGuardianInstruction(instruction),
+      };
+    }
+    case VaultInstruction.ClaimHoldAbove: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.ClaimHoldAbove,
+        ...parseClaimHoldAboveInstruction(instruction),
+      };
+    }
+    case VaultInstruction.ClaimNoSell: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.ClaimNoSell,
+        ...parseClaimNoSellInstruction(instruction),
+      };
+    }
+    case VaultInstruction.ClaimNoTradeWindow: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.ClaimNoTradeWindow,
+        ...parseClaimNoTradeWindowInstruction(instruction),
+      };
+    }
+    case VaultInstruction.CreateAgentGuardian: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.CreateAgentGuardian,
+        ...parseCreateAgentGuardianInstruction(instruction),
+      };
+    }
+    case VaultInstruction.CreateHoldAbove: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.CreateHoldAbove,
+        ...parseCreateHoldAboveInstruction(instruction),
+      };
+    }
+    case VaultInstruction.CreateNoSell: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.CreateNoSell,
+        ...parseCreateNoSellInstruction(instruction),
+      };
+    }
+    case VaultInstruction.CreateNoTradeWindow: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.CreateNoTradeWindow,
+        ...parseCreateNoTradeWindowInstruction(instruction),
+      };
+    }
+    case VaultInstruction.Initialize: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.Initialize,
+        ...parseInitializeInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SlashAgentGuardian: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SlashAgentGuardian,
+        ...parseSlashAgentGuardianInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SlashHoldAbove: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SlashHoldAbove,
+        ...parseSlashHoldAboveInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SlashNoSell: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SlashNoSell,
+        ...parseSlashNoSellInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SlashNoTradeWindow: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SlashNoTradeWindow,
+        ...parseSlashNoTradeWindowInstruction(instruction),
       };
     }
     default:

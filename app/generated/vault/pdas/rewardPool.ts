@@ -7,19 +7,13 @@
  */
 
 import {
-  getAddressEncoder,
   getBytesEncoder,
   getProgramDerivedAddress,
   type Address,
   type ProgramDerivedAddress,
 } from "@solana/kit";
 
-export type VaultSeeds = {
-  commitment: Address;
-};
-
-export async function findVaultPda(
-  seeds: VaultSeeds,
+export async function findRewardPoolPda(
   config: { programAddress?: Address | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
@@ -28,8 +22,9 @@ export async function findVaultPda(
   return await getProgramDerivedAddress({
     programAddress,
     seeds: [
-      getBytesEncoder().encode(new Uint8Array([118, 97, 117, 108, 116])),
-      getAddressEncoder().encode(seeds.commitment),
+      getBytesEncoder().encode(
+        new Uint8Array([114, 101, 119, 97, 114, 100, 95, 112, 111, 111, 108]),
+      ),
     ],
   });
 }

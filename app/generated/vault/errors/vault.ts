@@ -14,20 +14,60 @@ import {
 } from "@solana/kit";
 import { VAULT_PROGRAM_ADDRESS } from "../programs";
 
-/** VaultAlreadyExists: Vault already exists */
-export const VAULT_ERROR__VAULT_ALREADY_EXISTS = 0x1770; // 6000
-/** InvalidAmount: Invalid amount */
-export const VAULT_ERROR__INVALID_AMOUNT = 0x1771; // 6001
+/** StakeBelowMin: stake_amount below minimum */
+export const VAULT_ERROR__STAKE_BELOW_MIN = 0x1770; // 6000
+/** StakeAboveMax: stake_amount above protocol cap */
+export const VAULT_ERROR__STAKE_ABOVE_MAX = 0x1771; // 6001
+/** DurationOutOfRange: duration_days out of range [1, 365] */
+export const VAULT_ERROR__DURATION_OUT_OF_RANGE = 0x1772; // 6002
+/** BaselineZero: baseline must be greater than zero */
+export const VAULT_ERROR__BASELINE_ZERO = 0x1773; // 6003
+/** FloorOutOfRange: floor_amount must be in (0, baseline] */
+export const VAULT_ERROR__FLOOR_OUT_OF_RANGE = 0x1774; // 6004
+/** TokenAccountOwnerMismatch: token account owner mismatch */
+export const VAULT_ERROR__TOKEN_ACCOUNT_OWNER_MISMATCH = 0x1775; // 6005
+/** TokenAccountMintMismatch: token account mint mismatch */
+export const VAULT_ERROR__TOKEN_ACCOUNT_MINT_MISMATCH = 0x1776; // 6006
+/** ConflictingCommitment: conflicting commitment exists */
+export const VAULT_ERROR__CONFLICTING_COMMITMENT = 0x1777; // 6007
+/** NotYetExpired: commitment not yet expired */
+export const VAULT_ERROR__NOT_YET_EXPIRED = 0x1778; // 6008
+/** NoViolation: violation not present */
+export const VAULT_ERROR__NO_VIOLATION = 0x1779; // 6009
+/** ArithmeticOverflow: arithmetic overflow */
+export const VAULT_ERROR__ARITHMETIC_OVERFLOW = 0x177a; // 6010
+/** Unauthorized: unauthorized signer */
+export const VAULT_ERROR__UNAUTHORIZED = 0x177b; // 6011
 
 export type VaultError =
-  | typeof VAULT_ERROR__INVALID_AMOUNT
-  | typeof VAULT_ERROR__VAULT_ALREADY_EXISTS;
+  | typeof VAULT_ERROR__ARITHMETIC_OVERFLOW
+  | typeof VAULT_ERROR__BASELINE_ZERO
+  | typeof VAULT_ERROR__CONFLICTING_COMMITMENT
+  | typeof VAULT_ERROR__DURATION_OUT_OF_RANGE
+  | typeof VAULT_ERROR__FLOOR_OUT_OF_RANGE
+  | typeof VAULT_ERROR__NOT_YET_EXPIRED
+  | typeof VAULT_ERROR__NO_VIOLATION
+  | typeof VAULT_ERROR__STAKE_ABOVE_MAX
+  | typeof VAULT_ERROR__STAKE_BELOW_MIN
+  | typeof VAULT_ERROR__TOKEN_ACCOUNT_MINT_MISMATCH
+  | typeof VAULT_ERROR__TOKEN_ACCOUNT_OWNER_MISMATCH
+  | typeof VAULT_ERROR__UNAUTHORIZED;
 
 let vaultErrorMessages: Record<VaultError, string> | undefined;
 if (process.env.NODE_ENV !== "production") {
   vaultErrorMessages = {
-    [VAULT_ERROR__INVALID_AMOUNT]: `Invalid amount`,
-    [VAULT_ERROR__VAULT_ALREADY_EXISTS]: `Vault already exists`,
+    [VAULT_ERROR__ARITHMETIC_OVERFLOW]: `arithmetic overflow`,
+    [VAULT_ERROR__BASELINE_ZERO]: `baseline must be greater than zero`,
+    [VAULT_ERROR__CONFLICTING_COMMITMENT]: `conflicting commitment exists`,
+    [VAULT_ERROR__DURATION_OUT_OF_RANGE]: `duration_days out of range [1, 365]`,
+    [VAULT_ERROR__FLOOR_OUT_OF_RANGE]: `floor_amount must be in (0, baseline]`,
+    [VAULT_ERROR__NOT_YET_EXPIRED]: `commitment not yet expired`,
+    [VAULT_ERROR__NO_VIOLATION]: `violation not present`,
+    [VAULT_ERROR__STAKE_ABOVE_MAX]: `stake_amount above protocol cap`,
+    [VAULT_ERROR__STAKE_BELOW_MIN]: `stake_amount below minimum`,
+    [VAULT_ERROR__TOKEN_ACCOUNT_MINT_MISMATCH]: `token account mint mismatch`,
+    [VAULT_ERROR__TOKEN_ACCOUNT_OWNER_MISMATCH]: `token account owner mismatch`,
+    [VAULT_ERROR__UNAUTHORIZED]: `unauthorized signer`,
   };
 }
 
