@@ -1,10 +1,8 @@
 use crate::constants::*;
 use crate::events::Cancelled;
 use crate::state::{NoSellCommitment, RewardPool};
-use crate::utils::errors::ErrorCode;
-use crate::utils::terminate::redistribute_to_pool;
+use crate::utils::terminate::{move_lamports, redistribute_to_pool};
 use anchor_lang::prelude::*;
-use anchor_lang::system_program::{transfer, Transfer};
 
 #[derive(Accounts)]
 pub struct CancelNoSell<'info> {
@@ -20,67 +18,46 @@ pub struct CancelNoSell<'info> {
     )]
     pub commitment: Account<'info, NoSellCommitment>,
 
+    /// CHECK: program-owned 0-data PDA holding the stake; lamports drained directly.
     #[account(
         mut,
         seeds = [VAULT_SEED, commitment.key().as_ref()],
         bump = commitment.vault_bump,
     )]
-    pub vault: SystemAccount<'info>,
+    pub vault: UncheckedAccount<'info>,
 
     #[account(mut, seeds = [REWARD_POOL_SEED], bump = reward_pool.bump)]
     pub reward_pool: Account<'info, RewardPool>,
 
+    /// CHECK: program-owned 0-data PDA holding redistributed pool SOL.
     #[account(mut, seeds = [PROTOCOL_VAULT_SEED], bump)]
-    pub protocol_vault: SystemAccount<'info>,
+    pub protocol_vault: UncheckedAccount<'info>,
 
     /// CHECK: receives last-staker funds; must match reward_pool.treasury.
     #[account(mut, address = reward_pool.treasury)]
     pub treasury: UncheckedAccount<'info>,
-
-    pub system_program: Program<'info, System>,
 }
 
 pub fn handler(ctx: Context<CancelNoSell>) -> Result<()> {
     let commitment_key = ctx.accounts.commitment.key();
     let weight = ctx.accounts.commitment.weight;
     let stake = ctx.accounts.commitment.stake_amount;
-    let vault_bump = ctx.accounts.commitment.vault_bump;
 
     let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, stake)?;
-
-    let vault_seeds: &[&[u8]] = &[VAULT_SEED, commitment_key.as_ref(), &[vault_bump]];
-    let vault_signer: &[&[&[u8]]] = &[vault_seeds];
-    let vault_lamports = ctx.accounts.vault.lamports();
-    let owner_refund = vault_lamports.saturating_sub(stake);
 
     let principal_dest = if redistributed {
         ctx.accounts.protocol_vault.to_account_info()
     } else {
         ctx.accounts.treasury.to_account_info()
     };
-    transfer(
-        CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.vault.to_account_info(),
-                to: principal_dest,
-            },
-            vault_signer,
-        ),
-        stake,
-    )?;
+    move_lamports(&ctx.accounts.vault.to_account_info(), &principal_dest, stake)?;
 
-    if owner_refund > 0 {
-        transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.system_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.vault.to_account_info(),
-                    to: ctx.accounts.owner.to_account_info(),
-                },
-                vault_signer,
-            ),
-            owner_refund,
+    let vault_remaining = ctx.accounts.vault.lamports();
+    if vault_remaining > 0 {
+        move_lamports(
+            &ctx.accounts.vault.to_account_info(),
+            &ctx.accounts.owner.to_account_info(),
+            vault_remaining,
         )?;
     }
 

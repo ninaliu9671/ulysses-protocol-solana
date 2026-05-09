@@ -41,3 +41,18 @@ pub fn deduct_weight(pool: &mut RewardPool, weight: u64) -> Result<()> {
         .ok_or(ErrorCode::ArithmeticOverflow)?;
     Ok(())
 }
+
+pub fn move_lamports<'info>(
+    from: &AccountInfo<'info>,
+    to: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    let from_lamports = from.lamports();
+    require!(from_lamports >= amount, ErrorCode::ArithmeticOverflow);
+    **from.try_borrow_mut_lamports()? = from_lamports - amount;
+    **to.try_borrow_mut_lamports()? = to
+        .lamports()
+        .checked_add(amount)
+        .ok_or(ErrorCode::ArithmeticOverflow)?;
+    Ok(())
+}

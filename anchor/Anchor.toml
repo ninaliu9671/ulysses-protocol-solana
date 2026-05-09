@@ -5,8 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-ulysses-protocol = "7s1UK1nQWK7CrNcaS576gbpMjMqrph1vArRepnQYLki7"
-vault = "5ahewo5SgzMyWN2byK5PraBZm85ayuvM8KxAEFoFwh9y"
+vault = "3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S"
 
 [registry]
 url = "https://api.apr.dev"

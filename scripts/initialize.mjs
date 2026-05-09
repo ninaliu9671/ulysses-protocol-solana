@@ -1,10 +1,8 @@
 /**
- * Initialize ProtocolState on devnet.
+ * Initialize RewardPool + protocol_vault on devnet (v2.1).
  * Run once: node scripts/initialize.mjs
  */
 import { readFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
 import {
   Connection,
   Keypair,
@@ -15,73 +13,60 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 
-const PROGRAM_ID = new PublicKey("7s1UK1nQWK7CrNcaS576gbpMjMqrph1vArRepnQYLki7");
+const PROGRAM_ID = new PublicKey("3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S");
+const TREASURY = new PublicKey("9CYhSzFPXUQRmKncPtBFuPdRMZwumsexcDUVGaULcQo6");
+const SLASH_AUTHORITY = new PublicKey("4CAGNZ1VbqVNpWRUFdHLpjmN6tnALLDMJrVMZdrRvtf6");
 const RPC = "https://api.devnet.solana.com";
+const KEYPAIR_PATH = String.raw`\\wsl.localhost\Ubuntu\home\ninaliu\solana-dev-keypair.json`;
 
-// Load deployer keypair (same as anchor's provider wallet)
-// Try Windows path first, then home dir
-let keypairBytes;
-try {
-  // Anchor uses ~/.config/solana/id.json on Linux/WSL
-  keypairBytes = JSON.parse(
-    readFileSync(join(homedir(), ".config", "solana", "id.json"), "utf8")
-  );
-} catch {
-  // Fallback: try solana-keypair.json in home
-  keypairBytes = JSON.parse(
-    readFileSync(join(homedir(), "solana-keypair.json"), "utf8")
-  );
-}
-const payer = Keypair.fromSecretKey(new Uint8Array(keypairBytes));
-console.log("Payer:", payer.publicKey.toBase58());
+const keypairBytes = JSON.parse(readFileSync(KEYPAIR_PATH, "utf8"));
+const admin = Keypair.fromSecretKey(new Uint8Array(keypairBytes));
+console.log("Admin:", admin.publicKey.toBase58());
 
 const conn = new Connection(RPC, "confirmed");
 
-// Derive PDAs
-const [protocolStatePda, protocolStateBump] = PublicKey.findProgramAddressSync(
-  [Buffer.from("protocol")],
-  PROGRAM_ID
+const [rewardPoolPda] = PublicKey.findProgramAddressSync(
+  [Buffer.from("reward_pool")],
+  PROGRAM_ID,
 );
 const [protocolVaultPda] = PublicKey.findProgramAddressSync(
   [Buffer.from("protocol_vault")],
-  PROGRAM_ID
+  PROGRAM_ID,
 );
 
-console.log("ProtocolState PDA:", protocolStatePda.toBase58());
+console.log("RewardPool PDA: ", rewardPoolPda.toBase58());
 console.log("ProtocolVault PDA:", protocolVaultPda.toBase58());
+console.log("Treasury:        ", TREASURY.toBase58());
+console.log("SlashAuthority:  ", SLASH_AUTHORITY.toBase58());
 
-// Check if already initialized
-const existing = await conn.getAccountInfo(protocolStatePda);
+const existing = await conn.getAccountInfo(rewardPoolPda);
 if (existing && existing.data.length > 0) {
-  console.log("✔ ProtocolState already initialized! Lamports:", existing.lamports);
+  console.log("✔ RewardPool already initialized. Lamports:", existing.lamports);
   process.exit(0);
 }
 
-console.log("ProtocolState not found — sending initialize...");
+console.log("\nSending initialize...");
 
-// Anchor discriminator for "initialize": sha256("global:initialize")[0..8]
-// Pre-computed: [175, 175, 109, 31, 13, 152, 155, 237]
+// Anchor discriminator: sha256("global:initialize")[0..8]
 const INITIALIZE_DISC = Buffer.from([175, 175, 109, 31, 13, 152, 155, 237]);
-
-// Encode authority (32 bytes, payer's pubkey)
-const authorityBytes = payer.publicKey.toBuffer();
-
-const data = Buffer.concat([INITIALIZE_DISC, authorityBytes]);
 
 const ix = new TransactionInstruction({
   programId: PROGRAM_ID,
   keys: [
-    { pubkey: payer.publicKey, isSigner: true, isWritable: true },    // payer
-    { pubkey: protocolStatePda, isSigner: false, isWritable: true },  // protocol_state
-    { pubkey: protocolVaultPda, isSigner: false, isWritable: true },  // protocol_vault
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+    { pubkey: admin.publicKey, isSigner: true, isWritable: true },
+    { pubkey: rewardPoolPda, isSigner: false, isWritable: true },
+    { pubkey: protocolVaultPda, isSigner: false, isWritable: true },
+    { pubkey: TREASURY, isSigner: false, isWritable: false },
+    { pubkey: SLASH_AUTHORITY, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
   ],
-  data,
+  data: INITIALIZE_DISC,
 });
 
 const tx = new Transaction().add(ix);
-const sig = await sendAndConfirmTransaction(conn, tx, [payer], {
+const sig = await sendAndConfirmTransaction(conn, tx, [admin], {
   commitment: "confirmed",
 });
-console.log("✔ Initialized! Tx:", sig);
+console.log("\n✔ Initialized!");
+console.log("Tx:", sig);
 console.log("Explorer: https://explorer.solana.com/tx/" + sig + "?cluster=devnet");
