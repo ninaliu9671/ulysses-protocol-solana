@@ -30,6 +30,10 @@ import {
   parseCreateNoSellInstruction,
   parseCreateNoTradeWindowInstruction,
   parseInitializeInstruction,
+  parseSeedCreateAgentGuardianInstruction,
+  parseSeedCreateHoldAboveInstruction,
+  parseSeedCreateNoSellInstruction,
+  parseSeedCreateNoTradeWindowInstruction,
   parseSlashAgentGuardianInstruction,
   parseSlashHoldAboveInstruction,
   parseSlashNoSellInstruction,
@@ -47,6 +51,10 @@ import {
   type ParsedCreateNoSellInstruction,
   type ParsedCreateNoTradeWindowInstruction,
   type ParsedInitializeInstruction,
+  type ParsedSeedCreateAgentGuardianInstruction,
+  type ParsedSeedCreateHoldAboveInstruction,
+  type ParsedSeedCreateNoSellInstruction,
+  type ParsedSeedCreateNoTradeWindowInstruction,
   type ParsedSlashAgentGuardianInstruction,
   type ParsedSlashHoldAboveInstruction,
   type ParsedSlashNoSellInstruction,
@@ -142,6 +150,10 @@ export enum VaultInstruction {
   CreateNoSell,
   CreateNoTradeWindow,
   Initialize,
+  SeedCreateAgentGuardian,
+  SeedCreateHoldAbove,
+  SeedCreateNoSell,
+  SeedCreateNoTradeWindow,
   SlashAgentGuardian,
   SlashHoldAbove,
   SlashNoSell,
@@ -299,6 +311,50 @@ export function identifyVaultInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([8, 139, 90, 242, 76, 168, 198, 109]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SeedCreateAgentGuardian;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([137, 233, 166, 156, 47, 11, 99, 38]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SeedCreateHoldAbove;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([70, 18, 41, 201, 171, 52, 50, 49]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SeedCreateNoSell;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([173, 178, 216, 149, 106, 117, 148, 224]),
+      ),
+      0,
+    )
+  ) {
+    return VaultInstruction.SeedCreateNoTradeWindow;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([125, 8, 127, 167, 254, 198, 46, 74]),
       ),
       0,
@@ -386,6 +442,18 @@ export type ParsedVaultInstruction<
   | ({
       instructionType: VaultInstruction.Initialize;
     } & ParsedInitializeInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SeedCreateAgentGuardian;
+    } & ParsedSeedCreateAgentGuardianInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SeedCreateHoldAbove;
+    } & ParsedSeedCreateHoldAboveInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SeedCreateNoSell;
+    } & ParsedSeedCreateNoSellInstruction<TProgram>)
+  | ({
+      instructionType: VaultInstruction.SeedCreateNoTradeWindow;
+    } & ParsedSeedCreateNoTradeWindowInstruction<TProgram>)
   | ({
       instructionType: VaultInstruction.SlashAgentGuardian;
     } & ParsedSlashAgentGuardianInstruction<TProgram>)
@@ -493,6 +561,34 @@ export function parseVaultInstruction<TProgram extends string>(
       return {
         instructionType: VaultInstruction.Initialize,
         ...parseInitializeInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SeedCreateAgentGuardian: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SeedCreateAgentGuardian,
+        ...parseSeedCreateAgentGuardianInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SeedCreateHoldAbove: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SeedCreateHoldAbove,
+        ...parseSeedCreateHoldAboveInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SeedCreateNoSell: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SeedCreateNoSell,
+        ...parseSeedCreateNoSellInstruction(instruction),
+      };
+    }
+    case VaultInstruction.SeedCreateNoTradeWindow: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: VaultInstruction.SeedCreateNoTradeWindow,
+        ...parseSeedCreateNoTradeWindowInstruction(instruction),
       };
     }
     case VaultInstruction.SlashAgentGuardian: {

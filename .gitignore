@@ -61,3 +61,4 @@ watcher/watcher.db*
 
 # solana local validator
 test-ledger/
+scripts/seed-keys.json
