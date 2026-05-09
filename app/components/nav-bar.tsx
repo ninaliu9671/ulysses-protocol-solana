@@ -46,6 +46,7 @@ export function NavBar() {
           { label: "Home", href: "/" },
           { label: "Commitment", href: "/commitment" },
           { label: "Leaderboard", href: "/leaderboard" },
+          { label: "Docs", href: "/docs" },
         ].map((item) => {
           const active = isActive(item.href);
           return (
