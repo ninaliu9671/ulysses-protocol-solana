@@ -4,7 +4,6 @@ import useSWR from "swr";
 import { useCluster } from "../../components/cluster-context";
 import { getClusterUrl } from "../solana-client";
 import { getProgramAccountsByDisc, base64ToBytes, rpcCall } from "../rpc";
-import { fetchTotalSlashed } from "../events";
 import {
   AGENT_GUARDIAN_COMMITMENT_DISCRIMINATOR,
   HOLD_ABOVE_COMMITMENT_DISCRIMINATOR,
@@ -16,11 +15,14 @@ import {
 } from "../../generated/vault";
 import { getProgramDerivedAddress, getBytesEncoder } from "@solana/kit";
 
+// activeStakedLamports = sum of currently-open commitment vaults (live TVL).
+// Slashed/Cancelled/Claimed accounts are closed so they don't count here.
+// totalRedistributedLamports = current balance of protocol_vault PDA
+// (slash funds awaiting redistribution to disciplined stakers).
 export type ProtocolMetrics = {
   totalWeight: bigint;
   activeCommitments: number;
-  totalStakedLamports: bigint;
-  totalSlashedLamports: bigint;
+  activeStakedLamports: bigint;
   totalRedistributedLamports: bigint;
   accRewardPerWeight: bigint;
   treasury: string;
@@ -92,14 +94,6 @@ async function fetchMetrics(rpcUrl: string): Promise<ProtocolMetrics> {
     /* reward pool may not yet exist on a fresh deployment */
   }
 
-  // Slashed total: sum of principal across historical Slashed events.
-  let totalSlashed = 0n;
-  try {
-    totalSlashed = await fetchTotalSlashed(rpcUrl);
-  } catch {
-    /* event scan failures shouldn't break the rest of the page */
-  }
-
   // Redistributed: lamports currently sitting in the protocol_vault PDA.
   // protocol_vault is a 0-data SystemAccount; balance = pool of redistributed slash funds.
   let totalRedistributed = 0n;
@@ -121,8 +115,7 @@ async function fetchMetrics(rpcUrl: string): Promise<ProtocolMetrics> {
   return {
     totalWeight,
     activeCommitments: all.length,
-    totalStakedLamports: totalStaked,
-    totalSlashedLamports: totalSlashed,
+    activeStakedLamports: totalStaked,
     totalRedistributedLamports: totalRedistributed,
     accRewardPerWeight,
     treasury,

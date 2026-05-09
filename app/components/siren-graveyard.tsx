@@ -1,9 +1,7 @@
 "use client";
 
-import useSWR from "swr";
-import { useCluster } from "./cluster-context";
-import { getClusterUrl } from "../lib/solana-client";
-import { fetchSlashedEvents } from "../lib/events";
+import { useSlashedEvents } from "../lib/hooks/use-slashed-events";
+import { TYPE_BY_KEY } from "../lib/commitment-types";
 
 function shortAddr(a: string): string {
   return a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "—";
@@ -19,13 +17,7 @@ function relativeTime(ts: number | null): string {
 }
 
 export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
-  const { cluster } = useCluster();
-  const url = getClusterUrl(cluster);
-  const { data, isLoading } = useSWR(
-    ["siren-graveyard", url, limit],
-    () => fetchSlashedEvents(url, limit),
-    { refreshInterval: 30_000 },
-  );
+  const { events: data, isLoading } = useSlashedEvents(limit);
 
   return (
     <div className="rounded-xl p-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
@@ -44,16 +36,30 @@ export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
         <div className="space-y-2">
           <div className="grid grid-cols-12 gap-2 text-[10px] font-bold pb-2" style={{ color: "var(--muted)", letterSpacing: "0.1em", borderBottom: "1px solid var(--border)" }}>
             <div className="col-span-3">TIME</div>
-            <div className="col-span-4">USER</div>
-            <div className="col-span-5 text-right">LOSS (SOL)</div>
+            <div className="col-span-3">USER</div>
+            <div className="col-span-3">TYPE</div>
+            <div className="col-span-3 text-right">LOSS (SOL)</div>
           </div>
-          {data.map((e) => (
-            <div key={e.signature} className="grid grid-cols-12 gap-2 text-xs py-1.5" style={{ color: "var(--foreground)" }}>
-              <div className="col-span-3" style={{ color: "var(--muted)" }}>{relativeTime(e.blockTime)}</div>
-              <div className="col-span-4 font-mono">{shortAddr(e.owner)}</div>
-              <div className="col-span-5 text-right" style={{ color: "#fca5a5" }}>−{(Number(e.principal) / 1e9).toFixed(4)}</div>
-            </div>
-          ))}
+          {data.map((e) => {
+            const meta = e.type !== "Unknown" ? TYPE_BY_KEY[e.type] : null;
+            return (
+              <div key={e.signature} className="grid grid-cols-12 gap-2 text-xs py-1.5" style={{ color: "var(--foreground)" }}>
+                <div className="col-span-3" style={{ color: "var(--muted)" }}>{relativeTime(e.blockTime)}</div>
+                <div className="col-span-3 font-mono">{shortAddr(e.owner)}</div>
+                <div className="col-span-3 flex items-center gap-1.5">
+                  {meta ? (
+                    <>
+                      <span className="text-sm">{meta.emoji}</span>
+                      <span>{meta.label}</span>
+                    </>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>—</span>
+                  )}
+                </div>
+                <div className="col-span-3 text-right" style={{ color: "#fca5a5" }}>−{(Number(e.principal) / 1e9).toFixed(4)}</div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

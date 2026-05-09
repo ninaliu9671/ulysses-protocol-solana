@@ -55,7 +55,18 @@ export type SlashedEvent = {
   commitment: string;
   owner: string;
   principal: bigint; // lamports
+  type: "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian" | "Unknown";
 };
+
+function extractSlashType(logs: string[], slashLogIdx: number): SlashedEvent["type"] {
+  // Walk back from the Slashed `Program data` line to find the most recent
+  // `Program log: Instruction: Slash<Type>` emitted by the vault program.
+  for (let i = slashLogIdx - 1; i >= 0; i--) {
+    const m = logs[i].match(/Instruction: Slash(NoSell|HoldAbove|NoTradeWindow|AgentGuardian)/);
+    if (m) return m[1] as SlashedEvent["type"];
+  }
+  return "Unknown";
+}
 
 type SignatureInfo = { signature: string; blockTime: number | null; err: unknown };
 type TxMeta = {
@@ -93,8 +104,9 @@ export async function fetchSlashedEvents(
     for (let j = 0; j < txs.length; j++) {
       const tx = txs[j];
       if (!tx?.meta?.logMessages) continue;
-      for (const log of tx.meta.logMessages) {
-        const m = log.match(/^Program data: (.+)$/);
+      const logs = tx.meta.logMessages;
+      for (let logIdx = 0; logIdx < logs.length; logIdx++) {
+        const m = logs[logIdx].match(/^Program data: (.+)$/);
         if (!m) continue;
         const bytes = base64ToBytes(m[1]);
         if (bytes.length < 8) continue;
@@ -109,6 +121,7 @@ export async function fetchSlashedEvents(
           commitment,
           owner,
           principal,
+          type: extractSlashType(logs, logIdx),
         });
       }
     }

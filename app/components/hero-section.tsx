@@ -1,6 +1,7 @@
 "use client";
 
 import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
+import { useSlashedEvents } from "../lib/hooks/use-slashed-events";
 
 export function HeroSection() {
   return (
@@ -133,18 +134,24 @@ export function HeroSection() {
 
 function StatsBar() {
   const metrics = useProtocolMetrics();
+  const { events: slashedEvents } = useSlashedEvents(500);
 
   const fmt = (lamports: bigint | undefined): string =>
     lamports === undefined ? "—" : (Number(lamports) / 1e9).toFixed(2) + " SOL";
 
+  const totalSlashed =
+    slashedEvents === undefined
+      ? undefined
+      : slashedEvents.reduce((s, e) => s + e.principal, 0n);
+
   const stats = [
-    { icon: <VaultIcon />, value: fmt(metrics?.totalStakedLamports), label: "Total Staked" },
+    { icon: <VaultIcon />, value: fmt(metrics?.activeStakedLamports), label: "Active Staked" },
     {
       icon: <CommitmentsIcon />,
       value: metrics ? metrics.activeCommitments.toString() : "—",
       label: "Active Commitments",
     },
-    { icon: <RewardIcon />, value: fmt(metrics?.totalSlashedLamports), label: "Total Slashed" },
+    { icon: <RewardIcon />, value: fmt(totalSlashed), label: "Total Slashed" },
     { icon: <RewardIcon />, value: fmt(metrics?.totalRedistributedLamports), label: "Total Redistributed" },
   ];
 
