@@ -331,26 +331,7 @@ A commitment moves through a small number of states. Understanding the state mac
 
 ### 5.1 The State Diagram
 
-```
-               ┌──────────────┐
-               │   Active     │   ← duration not yet elapsed, no violation
-               └──────┬───────┘
-                      │
-     ┌────────────────┼────────────────┬─────────────────┐
-     │                │                │                 │
-     ▼                ▼                ▼                 ▼
-┌──────────┐    ┌──────────┐    ┌────────────┐   ┌──────────────┐
-│Unlockable│    │ Slashed  │    │ Cancelled  │   │   (still     │
-│ (expired,│    │(violation│    │ (voluntary │   │   Active)    │
-│ not yet  │    │ detected)│    │   exit)    │   │              │
-│ claimed) │    └────┬─────┘    └──────┬─────┘   └──────────────┘
-└────┬─────┘         │                 │
-     │               ▼                 ▼
-     ▼            forfeit           forfeit
-  Claimed       to reward           to reward
- (you call       pool               pool
-  claim)
-```
+<!-- DIAGRAM:state -->
 
 Four terminal states. Three of them — Slashed, Cancelled, Claimed — close the commitment account on-chain and free up the slot. Unlockable is a transitional state where time has expired but you haven't yet pulled the trigger.
 

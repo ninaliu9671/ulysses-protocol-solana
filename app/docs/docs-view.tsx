@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import { StateDiagram } from "./state-diagram";
 
 // GitHub-style slugger: lowercase, strip non-alphanumeric/space/hyphen,
 // collapse spaces to hyphens. Mirrors react-markdown default heading id
@@ -35,8 +39,18 @@ function buildToc(markdown: string): TocItem[] {
   return out;
 }
 
+// Splits markdown by the <!-- DIAGRAM:state --> marker so we can inject the
+// SVG component between two ReactMarkdown segments.
+function splitOnDiagramMarker(md: string): { before: string; after: string } | null {
+  const marker = "<!-- DIAGRAM:state -->";
+  const idx = md.indexOf(marker);
+  if (idx < 0) return null;
+  return { before: md.slice(0, idx), after: md.slice(idx + marker.length) };
+}
+
 export function DocsView({ markdown }: { markdown: string }) {
   const toc = useMemo(() => buildToc(markdown), [markdown]);
+  const split = useMemo(() => splitOnDiagramMarker(markdown), [markdown]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   // Highlight TOC entry whose section is currently in view.
@@ -114,9 +128,26 @@ export function DocsView({ markdown }: { markdown: string }) {
 
       {/* Body */}
       <article className="order-1 lg:order-2 docs-prose">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
+        {split ? (
+          <>
+            <MarkdownBlock>{split.before}</MarkdownBlock>
+            <StateDiagram />
+            <MarkdownBlock>{split.after}</MarkdownBlock>
+          </>
+        ) : (
+          <MarkdownBlock>{markdown}</MarkdownBlock>
+        )}
+      </article>
+    </div>
+  );
+}
+
+function MarkdownBlock({ children }: { children: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{
             h1: ({ children }) => {
               const text = String(children);
               return (
@@ -174,11 +205,38 @@ export function DocsView({ markdown }: { markdown: string }) {
                 </h3>
               );
             },
-            p: ({ children }) => (
-              <p style={{ color: "var(--foreground)", lineHeight: 1.75, fontSize: 14, marginBottom: 14 }}>
-                {children}
-              </p>
-            ),
+            p: ({ children }) => {
+              // Callout style: paragraph that opens with `<strong>Label.</strong> rest...`
+              // gets a soft left-border + bg, breaking up dense prose.
+              const arr = Array.isArray(children) ? children : [children];
+              const first = arr[0] as ReactNode;
+              const isCallout =
+                first && typeof first === "object" && "type" in (first as { type?: unknown }) &&
+                (first as { type?: string }).type === "strong";
+              if (isCallout) {
+                return (
+                  <p
+                    style={{
+                      color: "var(--foreground)",
+                      lineHeight: 1.75,
+                      fontSize: 14,
+                      marginBottom: 14,
+                      borderLeft: "3px solid var(--gold)",
+                      background: "rgba(201,169,110,0.04)",
+                      padding: "10px 14px",
+                      borderRadius: "0 6px 6px 0",
+                    }}
+                  >
+                    {children}
+                  </p>
+                );
+              }
+              return (
+                <p style={{ color: "var(--foreground)", lineHeight: 1.75, fontSize: 14, marginBottom: 14 }}>
+                  {children}
+                </p>
+              );
+            },
             ul: ({ children }) => (
               <ul style={{ color: "var(--foreground)", lineHeight: 1.75, fontSize: 14, marginBottom: 14, paddingLeft: 22, listStyle: "disc" }}>
                 {children}
@@ -280,11 +338,9 @@ export function DocsView({ markdown }: { markdown: string }) {
                 {children}
               </td>
             ),
-          }}
-        >
-          {markdown}
-        </ReactMarkdown>
-      </article>
-    </div>
+        }}
+      >
+        {children}
+      </ReactMarkdown>
   );
 }
