@@ -1,239 +1,153 @@
 'use strict';
 
 const { Connection, PublicKey } = require('@solana/web3.js');
-const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+const { TOKEN_PROGRAM_ID } = require('@solana/spl-token');
+const { sha256 } = require('@noble/hashes/sha2');
 const bs58 = require('bs58');
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants — must match anchor/programs/vault/
 // ---------------------------------------------------------------------------
 
-const PROGRAM_ID = new PublicKey('7s1UK1nQWK7CrNcaS576gbpMjMqrph1vArRepnQYLki7');
+const PROGRAM_ID = new PublicKey('3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S');
 
-/** Discriminator bytes for CommitmentAccount (first 8 bytes of account data) */
-const COMMITMENT_DISCRIMINATOR = Buffer.from([155, 206, 108, 147, 168, 110, 100, 181]);
+function anchorDisc(name) {
+  return Buffer.from(sha256(`account:${name}`)).slice(0, 8);
+}
 
-// bs58-encoded discriminator used as memcmp filter value
-const DISCRIMINATOR_B58 = bs58.encode(COMMITMENT_DISCRIMINATOR);
-
-// ---------------------------------------------------------------------------
-// CommitmentType enum variant index → name
-// ---------------------------------------------------------------------------
-
-const COMMITMENT_TYPE_NAMES = {
-  0: 'NoBuy',
-  1: 'NoSell',
-  2: 'HoldAbove',
-  3: 'HoldUntil',
-  4: 'NoTradeWindow',
+const DISC = {
+  NoSell: anchorDisc('NoSellCommitment'),
+  HoldAbove: anchorDisc('HoldAboveCommitment'),
+  NoTradeWindow: anchorDisc('NoTradeWindowCommitment'),
+  AgentGuardian: anchorDisc('AgentGuardianCommitment'),
 };
 
 // ---------------------------------------------------------------------------
-// deserializeCommitmentAccount
+// Deserializers — layouts must match #[derive(InitSpace)] field order
 // ---------------------------------------------------------------------------
 
-/**
- * Deserialize a raw CommitmentAccount account data buffer into a plain object.
- *
- * Layout:
- *   [0..8)   discriminator  (8 bytes)
- *   [8..40)  owner          (32 bytes Pubkey)
- *   [40..72) target_mint    (32 bytes Pubkey)
- *   [72)     commitment_type variant index (u8)
- *            + optional payload:
- *              variant 0 (NoBuy)         — no payload
- *              variant 1 (NoSell)        — no payload
- *              variant 2 (HoldAbove)     — threshold u64 LE (8 bytes)
- *              variant 3 (HoldUntil)     — unlock_at i64 LE (8 bytes)
- *              variant 4 (NoTradeWindow) — window_start_hour u8 + window_end_hour u8 (2 bytes)
- *   ...      stake_amount   u64 LE (8 bytes)
- *   ...      slash_destination 32 bytes Pubkey
- *   ...      guardian_pubkey   1 byte (0=None / 1=Some) + 32 bytes if Some
- *   ...      is_active      1 byte bool
- *   ...      created_at     i64 LE (8 bytes)
- *   ...      bump           1 byte
- *   ...      vault_bump     1 byte
- *
- * @param {Buffer} data - Raw account data buffer
- * @returns {object} Parsed fields
- */
-function deserializeCommitmentAccount(data) {
-  let offset = 0;
-
-  // --- discriminator (8 bytes) — skip ---
-  offset += 8;
-
-  // --- owner (32 bytes) ---
-  const owner = bs58.encode(data.slice(offset, offset + 32));
-  offset += 32;
-
-  // --- target_mint (32 bytes) ---
-  const target_mint = bs58.encode(data.slice(offset, offset + 32));
-  offset += 32;
-
-  // --- commitment_type (variant u8 + optional payload) ---
-  const variantIndex = data.readUInt8(offset);
-  offset += 1;
-
-  let commitment_type;
-  switch (variantIndex) {
-    case 0: // NoBuy — no payload
-      commitment_type = { type: 'NoBuy' };
-      break;
-
-    case 1: // NoSell — no payload
-      commitment_type = { type: 'NoSell' };
-      break;
-
-    case 2: // HoldAbove — threshold u64 LE (8 bytes)
-      commitment_type = {
-        type: 'HoldAbove',
-        threshold: data.readBigUInt64LE(offset),
-      };
-      offset += 8;
-      break;
-
-    case 3: // HoldUntil — unlock_at i64 LE (8 bytes)
-      commitment_type = {
-        type: 'HoldUntil',
-        unlock_at: data.readBigInt64LE(offset),
-      };
-      offset += 8;
-      break;
-
-    case 4: // NoTradeWindow — window_start_hour u8 + window_end_hour u8
-      commitment_type = {
-        type: 'NoTradeWindow',
-        window_start_hour: data.readUInt8(offset),
-        window_end_hour: data.readUInt8(offset + 1),
-      };
-      offset += 2;
-      break;
-
-    default:
-      throw new Error(`Unknown CommitmentType variant index: ${variantIndex}`);
-  }
-
-  // --- stake_amount (u64 LE, 8 bytes) ---
-  const stake_amount = data.readBigUInt64LE(offset);
-  offset += 8;
-
-  // --- slash_destination (32 bytes) ---
-  const slash_destination = bs58.encode(data.slice(offset, offset + 32));
-  offset += 32;
-
-  // --- guardian_pubkey (Option<Pubkey>: 1 byte tag + 32 bytes if Some) ---
-  const guardianTag = data.readUInt8(offset);
-  offset += 1;
-
-  let guardian_pubkey = null;
-  if (guardianTag === 1) {
-    guardian_pubkey = bs58.encode(data.slice(offset, offset + 32));
-    offset += 32;
-  }
-
-  // --- is_active (1 byte bool) ---
-  const is_active = data.readUInt8(offset) !== 0;
-  offset += 1;
-
-  // --- created_at (i64 LE, 8 bytes) ---
-  const created_at = data.readBigInt64LE(offset);
-  offset += 8;
-
-  // --- bump (1 byte) ---
-  const bump = data.readUInt8(offset);
-  offset += 1;
-
-  // --- vault_bump (1 byte) ---
-  const vault_bump = data.readUInt8(offset);
-  // offset += 1; // no further reads needed
-
-  return {
-    owner,
-    target_mint,
-    commitment_type,
-    stake_amount,
-    slash_destination,
-    guardian_pubkey,
-    is_active,
-    created_at,
-    bump,
-    vault_bump,
-  };
+function readPubkey(data, offset) {
+  return bs58.encode(data.slice(offset, offset + 32));
 }
 
+// NoSellCommitment / HoldAboveCommitment have identical layout:
+// owner(32) + target_mint(32) + floor_amount(8) + stake_amount(8) + weight(8)
+// + reward_debt(16) + created_at(8) + expires_at(8) + bump(1) + vault_bump(1)
+function deserializeMintScoped(data, type) {
+  let o = 8;
+  const owner = readPubkey(data, o); o += 32;
+  const target_mint = readPubkey(data, o); o += 32;
+  const floor_amount = data.readBigUInt64LE(o); o += 8;
+  const stake_amount = data.readBigUInt64LE(o); o += 8;
+  const weight = data.readBigUInt64LE(o); o += 8;
+  const reward_debt = data.readBigUInt64LE(o) | (data.readBigUInt64LE(o + 8) << 64n); o += 16;
+  const created_at = data.readBigInt64LE(o); o += 8;
+  const expires_at = data.readBigInt64LE(o); o += 8;
+  const bump = data.readUInt8(o); o += 1;
+  const vault_bump = data.readUInt8(o);
+  return { type, owner, target_mint, floor_amount, stake_amount, weight, reward_debt, created_at, expires_at, bump, vault_bump };
+}
+
+// NoTradeWindowCommitment:
+// owner(32) + nonce(8) + window_start_hour(1) + window_end_hour(1)
+// + stake_amount(8) + weight(8) + reward_debt(16) + created_at(8) + expires_at(8) + bump(1) + vault_bump(1)
+function deserializeNoTradeWindow(data) {
+  let o = 8;
+  const owner = readPubkey(data, o); o += 32;
+  const nonce = data.readBigUInt64LE(o); o += 8;
+  const window_start_hour = data.readUInt8(o); o += 1;
+  const window_end_hour = data.readUInt8(o); o += 1;
+  const stake_amount = data.readBigUInt64LE(o); o += 8;
+  const weight = data.readBigUInt64LE(o); o += 8;
+  const reward_debt = data.readBigUInt64LE(o) | (data.readBigUInt64LE(o + 8) << 64n); o += 16;
+  const created_at = data.readBigInt64LE(o); o += 8;
+  const expires_at = data.readBigInt64LE(o); o += 8;
+  const bump = data.readUInt8(o); o += 1;
+  const vault_bump = data.readUInt8(o);
+  return { type: 'NoTradeWindow', owner, nonce, window_start_hour, window_end_hour, stake_amount, weight, reward_debt, created_at, expires_at, bump, vault_bump };
+}
+
+// AgentGuardianCommitment:
+// owner(32) + guardian_pubkey(32) + stake_amount(8) + weight(8)
+// + reward_debt(16) + created_at(8) + expires_at(8) + bump(1) + vault_bump(1)
+function deserializeAgentGuardian(data) {
+  let o = 8;
+  const owner = readPubkey(data, o); o += 32;
+  const guardian_pubkey = readPubkey(data, o); o += 32;
+  const stake_amount = data.readBigUInt64LE(o); o += 8;
+  const weight = data.readBigUInt64LE(o); o += 8;
+  const reward_debt = data.readBigUInt64LE(o) | (data.readBigUInt64LE(o + 8) << 64n); o += 16;
+  const created_at = data.readBigInt64LE(o); o += 8;
+  const expires_at = data.readBigInt64LE(o); o += 8;
+  const bump = data.readUInt8(o); o += 1;
+  const vault_bump = data.readUInt8(o);
+  return { type: 'AgentGuardian', owner, guardian_pubkey, stake_amount, weight, reward_debt, created_at, expires_at, bump, vault_bump };
+}
+
+const PARSERS = {
+  NoSell: (d) => deserializeMintScoped(d, 'NoSell'),
+  HoldAbove: (d) => deserializeMintScoped(d, 'HoldAbove'),
+  NoTradeWindow: deserializeNoTradeWindow,
+  AgentGuardian: deserializeAgentGuardian,
+};
+
 // ---------------------------------------------------------------------------
-// fetchAllCommitments
+// Fetch all commitments (4 types) via getProgramAccounts with discriminator filter
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch all active CommitmentAccount PDAs from the Solana program.
- *
- * @param {Connection} connection - @solana/web3.js Connection instance
- * @returns {Promise<Array<object>>} Array of active commitment objects with pubkey field
- */
-async function fetchAllCommitments(connection) {
+async function fetchAllCommitmentsByType(connection, typeName) {
+  const disc = DISC[typeName];
   const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
-    filters: [
-      {
-        memcmp: {
-          offset: 0,
-          bytes: DISCRIMINATOR_B58,
-        },
-      },
-    ],
+    filters: [{ memcmp: { offset: 0, bytes: bs58.encode(disc) } }],
   });
+  const parser = PARSERS[typeName];
+  return accounts
+    .map(({ pubkey, account }) => {
+      try {
+        return { pubkey: pubkey.toBase58(), ...parser(account.data) };
+      } catch (err) {
+        console.warn(`[chain] Failed to parse ${typeName} ${pubkey.toBase58()}: ${err.message}`);
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
 
-  const parsed = accounts.map(({ pubkey, account }) => {
-    try {
-      const fields = deserializeCommitmentAccount(account.data);
-      return { pubkey: pubkey.toBase58(), ...fields };
-    } catch (err) {
-      console.warn(`[chain] Failed to deserialize account ${pubkey.toBase58()}:`, err.message);
-      return null;
-    }
-  });
-
-  return parsed.filter(Boolean).filter((c) => c.is_active === true);
+async function fetchAllCommitments(connection) {
+  const types = Object.keys(DISC);
+  const all = await Promise.all(types.map((t) => fetchAllCommitmentsByType(connection, t)));
+  return all.flat();
 }
 
 // ---------------------------------------------------------------------------
-// getTokenBalance
+// SPL token balance: SUM across all owner's accounts for the mint (per OQ-8)
 // ---------------------------------------------------------------------------
 
-/**
- * Get the SPL token balance for a given owner and mint.
- * Returns the raw token amount as a BigInt.
- * Returns 0n if the associated token account does not exist.
- *
- * @param {Connection} connection - @solana/web3.js Connection instance
- * @param {string} ownerPubkeyStr - Base58 owner public key
- * @param {string} mintPubkeyStr  - Base58 mint public key
- * @returns {Promise<BigInt>}
- */
-async function getTokenBalance(connection, ownerPubkeyStr, mintPubkeyStr) {
-  try {
-    const owner = new PublicKey(ownerPubkeyStr);
-    const mint = new PublicKey(mintPubkeyStr);
-
-    const ata = getAssociatedTokenAddressSync(mint, owner, false);
-    const info = await connection.getTokenAccountBalance(ata);
-
-    return BigInt(info.value.amount);
-  } catch (_err) {
-    // Account doesn't exist or RPC error — treat as zero balance
-    return 0n;
+async function getOwnerTokenBalanceAggregate(connection, ownerStr, mintStr) {
+  const owner = new PublicKey(ownerStr);
+  const mint = new PublicKey(mintStr);
+  const accounts = await connection.getParsedTokenAccountsByOwner(owner, { mint });
+  let total = 0n;
+  for (const { account } of accounts.value) {
+    const amt = account.data?.parsed?.info?.tokenAmount?.amount;
+    if (amt) total += BigInt(amt);
   }
+  return total;
 }
 
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
+async function getOwnerTokenAccountPubkeys(connection, ownerStr, mintStr) {
+  const owner = new PublicKey(ownerStr);
+  const mint = new PublicKey(mintStr);
+  const accounts = await connection.getParsedTokenAccountsByOwner(owner, { mint });
+  return accounts.value.map((a) => a.pubkey);
+}
 
 module.exports = {
   PROGRAM_ID,
-  COMMITMENT_DISCRIMINATOR,
-  deserializeCommitmentAccount,
+  TOKEN_PROGRAM_ID,
+  DISC,
   fetchAllCommitments,
-  getTokenBalance,
+  fetchAllCommitmentsByType,
+  getOwnerTokenBalanceAggregate,
+  getOwnerTokenAccountPubkeys,
 };

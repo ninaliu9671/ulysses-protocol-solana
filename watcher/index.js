@@ -8,128 +8,151 @@ const express = require('express');
 const cors = require('cors');
 
 const db = require('./db');
-const { fetchAllCommitments, getTokenBalance } = require('./chain');
-const { patrol } = require('./patrol');
-
-// ============================================================================
-// Configuration & Initialization
-// ============================================================================
+const { fetchAllCommitments } = require('./chain');
+const { patrol, checkViolation } = require('./patrol');
+const { submitSlash } = require('./slash');
 
 const RPC_URL = process.env.HELIUS_RPC_URL ?? 'https://api.devnet.solana.com';
+const PORT = process.env.PORT ?? 3001;
+const HELIUS_WEBHOOK_SECRET = process.env.HELIUS_WEBHOOK_SECRET ?? null;
+const KEYPAIR_PATH = process.env.SLASHER_KEYPAIR_PATH ?? path.join(__dirname, 'slasher-keypair.json');
+
 const connection = new Connection(RPC_URL, 'confirmed');
 
-// Load slasher keypair
+// Load slasher keypair: env JSON first (for Railway-style deploy), else file path.
 let slasherKeypair = null;
-const keypairPath = process.env.SLASHER_KEYPAIR_PATH ?? path.join(__dirname, 'slasher-keypair.json');
-
-try {
-  slasherKeypair = Keypair.fromSecretKey(
-    Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath, 'utf8')))
-  );
-} catch (err) {
-  console.log(`[WATCHER] WARNING: Slasher keypair not found at ${keypairPath}. Slash functionality disabled.`);
-  slasherKeypair = null;
+let keypairBytes;
+if (process.env.SLASHER_KEYPAIR_JSON) {
+  keypairBytes = JSON.parse(process.env.SLASHER_KEYPAIR_JSON);
+} else {
+  try {
+    keypairBytes = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf8'));
+  } catch (err) {
+    console.warn(`[WATCHER] no slasher keypair at ${KEYPAIR_PATH} and SLASHER_KEYPAIR_JSON not set; slash disabled.`);
+  }
+}
+if (keypairBytes) {
+  slasherKeypair = Keypair.fromSecretKey(Uint8Array.from(keypairBytes));
+  console.log('[WATCHER] slasher pubkey:', slasherKeypair.publicKey.toBase58());
 }
 
-// Initialize database
 db.init();
 
-// ============================================================================
-// Polling Loops
-// ============================================================================
+let lastWebhookSeen = null;
+let lastPollCompleted = null;
+let lastFullScanCompleted = null;
 
-/**
- * Sync commitments from chain every 60 seconds.
- * Fetch all active commitments and store them in DB.
- * If a commitment hasn't been snapshotted yet, capture the current token balance.
- */
-async function syncCommitments() {
-  try {
-    const commitments = await fetchAllCommitments(connection);
-    for (const c of commitments) {
-      db.upsertCommitment(c);
-      if (!db.getSnapshot(c.pubkey)) {
-        const balance = await getTokenBalance(connection, c.owner, c.target_mint);
-        db.setSnapshot(c.pubkey, balance);
-      }
-    }
-    console.log(`[SYNC] ${commitments.length} active commitments`);
-  } catch (err) {
-    console.error('[SYNC] Error:', err.message);
-  }
-}
-
-/**
- * Run patrol loop every 30 seconds.
- * Detects violations and executes slashes if slasher keypair is available.
- */
 async function runPatrol() {
-  if (!slasherKeypair) {
-    console.warn('[PATROL] Skipping — no slasher keypair loaded');
-    return;
-  }
+  if (!slasherKeypair) return;
   try {
     await patrol(connection, db, slasherKeypair);
+    lastPollCompleted = Date.now();
   } catch (err) {
-    console.error('[PATROL] Error:', err.message);
+    console.error('[PATROL] error:', err.message);
   }
 }
 
-// ============================================================================
-// Express Server
-// ============================================================================
+// Helius webhook handler — best-effort fast path. Iterates the addresses
+// referenced in the event, finds matching active commitments, runs check.
+async function handleWebhookEvent(events) {
+  if (!slasherKeypair) return;
+  lastWebhookSeen = Date.now();
+  const all = await fetchAllCommitments(connection);
+  const owners = new Set();
+  for (const ev of events) {
+    for (const acct of ev.accountData ?? []) {
+      if (acct.account) owners.add(acct.account);
+    }
+    if (ev.feePayer) owners.add(ev.feePayer);
+  }
+  const candidates = all.filter((c) => owners.has(c.owner));
+  for (const c of candidates) {
+    if (db.wasAlreadySlashed(c.pubkey)) continue;
+    try {
+      const res = await checkViolation(connection, c);
+      if (res.violated) {
+        console.log(`[WEBHOOK] violation detected ${c.type} ${c.pubkey}`);
+        try {
+          const sig = await submitSlash(connection, c, slasherKeypair);
+          console.log(`[WEBHOOK SLASH] ${sig}`);
+          db.recordSlashAttempt(c.pubkey, c.type, c.owner, sig, true, null);
+        } catch (err) {
+          db.recordSlashAttempt(c.pubkey, c.type, c.owner, null, false, err.message);
+        }
+      }
+    } catch (err) {
+      console.warn(`[WEBHOOK] check ${c.pubkey} failed: ${err.message}`);
+    }
+  }
+}
+
+// Startup full-scan recovery: catches any violations that occurred while watcher
+// was offline. Per OQ-11.
+async function recoverOnStartup() {
+  console.log('[STARTUP] full-scan beginning...');
+  await runPatrol();
+  lastFullScanCompleted = Date.now();
+  console.log('[STARTUP] full-scan complete');
+}
 
 const app = express();
-const PORT = process.env.PORT ?? 3001;
-
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '4mb' }));
 
-/**
- * GET /commitments
- * Returns all active commitments from the database.
- */
-app.get('/commitments', (req, res) => {
+app.post('/webhook/helius', async (req, res) => {
+  if (HELIUS_WEBHOOK_SECRET) {
+    if (req.headers['x-webhook-secret'] !== HELIUS_WEBHOOK_SECRET) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+  }
+  const events = Array.isArray(req.body) ? req.body : [req.body];
+  res.json({ ok: true, count: events.length });
+  handleWebhookEvent(events).catch((err) => console.error('[WEBHOOK] handler error:', err.message));
+});
+
+app.get('/health', async (req, res) => {
+  let slasherBalanceSol = null;
+  if (slasherKeypair) {
+    try {
+      const lamports = await connection.getBalance(slasherKeypair.publicKey);
+      slasherBalanceSol = lamports / 1e9;
+    } catch (_) {}
+  }
+  res.json({
+    healthy: true,
+    uptime_seconds: process.uptime(),
+    slasher_pubkey: slasherKeypair?.publicKey.toBase58() ?? null,
+    slasher_balance_sol: slasherBalanceSol,
+    last_webhook_seen: lastWebhookSeen,
+    last_poll_completed: lastPollCompleted,
+    last_full_scan_completed: lastFullScanCompleted,
+    rpc_url: RPC_URL,
+  });
+});
+
+app.get('/commitments', async (req, res) => {
   try {
-    const commitments = db.getActiveCommitments();
-    res.json(commitments);
+    const all = await fetchAllCommitments(connection);
+    res.json(all.map((c) => ({
+      ...c,
+      stake_amount: c.stake_amount.toString(),
+      weight: c.weight.toString(),
+      reward_debt: c.reward_debt.toString(),
+      created_at: c.created_at.toString(),
+      expires_at: c.expires_at.toString(),
+      floor_amount: c.floor_amount?.toString(),
+      nonce: c.nonce?.toString(),
+    })));
   } catch (err) {
-    console.error('[GET /commitments] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * GET /history
- * Returns slash history (slash events) from the database.
- */
 app.get('/history', (req, res) => {
-  try {
-    const history = db.getSlashHistory();
-    res.json(history);
-  } catch (err) {
-    console.error('[GET /history] Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  res.json(db.getRecentSlashes(50));
 });
 
-// ============================================================================
-// Startup Sequence
-// ============================================================================
-
-// Initial sync
-syncCommitments();
-
-// Start periodic sync (every 60 seconds)
-setInterval(syncCommitments, 60_000);
-
-// Start patrol loop after 5 second delay (every 30 seconds)
-setTimeout(() => {
-  runPatrol();
-  setInterval(runPatrol, 30_000);
-}, 5_000);
-
-// Start Express server
-app.listen(PORT, () => {
-  console.log('[WATCHER] Listening on :' + PORT);
+recoverOnStartup().then(() => {
+  setInterval(runPatrol, 60_000);
+  app.listen(PORT, () => console.log(`[WATCHER] listening on :${PORT}`));
 });

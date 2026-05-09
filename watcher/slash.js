@@ -1,154 +1,92 @@
 'use strict';
 
-const {
-  Connection,
-  PublicKey,
-  Transaction,
-  TransactionInstruction,
-  SystemProgram,
-  sendAndConfirmTransaction,
-  Keypair
-} = require('@solana/web3.js');
+const { PublicKey, Transaction, TransactionInstruction, sendAndConfirmTransaction } = require('@solana/web3.js');
+const { sha256 } = require('@noble/hashes/sha2');
+const { PROGRAM_ID, getOwnerTokenAccountPubkeys } = require('./chain');
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+// On-chain treasury (from initialize) — must match RewardPool.treasury.
+const TREASURY = new PublicKey('9CYhSzFPXUQRmKncPtBFuPdRMZwumsexcDUVGaULcQo6');
 
-const PROGRAM_ID = new PublicKey('7s1UK1nQWK7CrNcaS576gbpMjMqrph1vArRepnQYLki7');
+const REWARD_POOL_SEED = Buffer.from('reward_pool');
+const PROTOCOL_VAULT_SEED = Buffer.from('protocol_vault');
+const NO_SELL_SEED = Buffer.from('no_sell');
+const HOLD_ABOVE_SEED = Buffer.from('hold_above');
+const NO_TRADE_SEED = Buffer.from('no_trade');
+const AGENT_GUARD_SEED = Buffer.from('agent_guard');
+const VAULT_SEED = Buffer.from('vault');
 
-/** Slash instruction discriminator (8 bytes) */
-const SLASH_DISCRIMINATOR = Buffer.from([204, 141, 18, 161, 8, 177, 92, 142]);
+function ixDisc(name) {
+  return Buffer.from(sha256(`global:${name}`)).slice(0, 8);
+}
 
-// ---------------------------------------------------------------------------
-// executeSlash
-// ---------------------------------------------------------------------------
+const IX_DISC = {
+  slash_no_sell: ixDisc('slash_no_sell'),
+  slash_hold_above: ixDisc('slash_hold_above'),
+  slash_no_trade_window: ixDisc('slash_no_trade_window'),
+  slash_agent_guardian: ixDisc('slash_agent_guardian'),
+};
 
-/**
- * Build and send the slash instruction on-chain.
- *
- * @param {Connection} connection - Solana Connection instance
- * @param {Keypair} slasher - The protocol authority/slasher keypair
- * @param {Object} commitment - Object with fields: owner (base58), target_mint (base58), slash_destination (base58)
- * @param {Uint8Array|Buffer|null} txSignatureBytes - The 64-byte violation tx signature (or null for zeros)
- * @returns {string} Transaction signature
- * @throws {Error} If instruction fails to execute
- */
-async function executeSlash(connection, slasher, commitment, txSignatureBytes) {
-  try {
-    // =========================================================================
-    // Step 1: Build data buffer
-    // =========================================================================
-    // Layout: [8-byte discriminator] + [64-byte tx_signature]
+function findPda(seeds) {
+  return PublicKey.findProgramAddressSync(seeds, PROGRAM_ID);
+}
 
-    let txSignature = Buffer.alloc(64);
-
-    if (txSignatureBytes) {
-      if (txSignatureBytes.length < 64) {
-        // Zero-pad to 64 bytes
-        Buffer.concat([
-          Buffer.from(txSignatureBytes),
-          Buffer.alloc(64 - txSignatureBytes.length)
-        ]).copy(txSignature);
-      } else {
-        // Take first 64 bytes
-        Buffer.from(txSignatureBytes).copy(txSignature, 0, 0, 64);
-      }
+function commitmentPda(c) {
+  switch (c.type) {
+    case 'NoSell':
+      return findPda([NO_SELL_SEED, new PublicKey(c.owner).toBuffer(), new PublicKey(c.target_mint).toBuffer()]);
+    case 'HoldAbove':
+      return findPda([HOLD_ABOVE_SEED, new PublicKey(c.owner).toBuffer(), new PublicKey(c.target_mint).toBuffer()]);
+    case 'NoTradeWindow': {
+      const nonceBuf = Buffer.alloc(8);
+      nonceBuf.writeBigUInt64LE(c.nonce);
+      return findPda([NO_TRADE_SEED, new PublicKey(c.owner).toBuffer(), nonceBuf]);
     }
-    // else: txSignature remains all zeros
-
-    const data = Buffer.concat([SLASH_DISCRIMINATOR, txSignature]);
-
-    // =========================================================================
-    // Step 2: Derive PDAs
-    // =========================================================================
-
-    const [protocolState] = PublicKey.findProgramAddressSync(
-      [Buffer.from('protocol')],
-      PROGRAM_ID
-    );
-
-    const commitmentPDA = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('commitment'),
-        new PublicKey(commitment.owner).toBuffer(),
-        new PublicKey(commitment.target_mint).toBuffer()
-      ],
-      PROGRAM_ID
-    )[0];
-
-    const commitmentVault = PublicKey.findProgramAddressSync(
-      [Buffer.from('vault'), commitmentPDA.toBuffer()],
-      PROGRAM_ID
-    )[0];
-
-    const slashDestination = new PublicKey(commitment.slash_destination);
-
-    // =========================================================================
-    // Step 3: Create accounts array (order is critical)
-    // =========================================================================
-
-    const keys = [
-      {
-        pubkey: slasher.publicKey,
-        isSigner: true,
-        isWritable: true
-      },
-      {
-        pubkey: protocolState,
-        isSigner: false,
-        isWritable: false
-      },
-      {
-        pubkey: commitmentPDA,
-        isSigner: false,
-        isWritable: true
-      },
-      {
-        pubkey: commitmentVault,
-        isSigner: false,
-        isWritable: true
-      },
-      {
-        pubkey: slashDestination,
-        isSigner: false,
-        isWritable: true
-      },
-      {
-        pubkey: SystemProgram.programId,
-        isSigner: false,
-        isWritable: false
-      }
-    ];
-
-    // =========================================================================
-    // Step 4: Create TransactionInstruction
-    // =========================================================================
-
-    const instruction = new TransactionInstruction({
-      programId: PROGRAM_ID,
-      keys,
-      data
-    });
-
-    // =========================================================================
-    // Step 5: Create and send Transaction
-    // =========================================================================
-
-    const transaction = new Transaction().add(instruction);
-
-    const sig = await sendAndConfirmTransaction(
-      connection,
-      transaction,
-      [slasher],
-      { commitment: 'confirmed' }
-    );
-
-    console.log(`[SLASH] ${sig}`);
-    return sig;
-  } catch (err) {
-    console.error(`[SLASH ERROR] ${err.message}`);
-    throw err;
+    case 'AgentGuardian':
+      return findPda([AGENT_GUARD_SEED, new PublicKey(c.owner).toBuffer()]);
+    default:
+      throw new Error('unknown type ' + c.type);
   }
 }
 
-module.exports = { executeSlash };
+function commonAccounts(c, slasher, cPda) {
+  const [vault] = findPda([VAULT_SEED, cPda.toBuffer()]);
+  const [reward_pool] = findPda([REWARD_POOL_SEED]);
+  const [protocol_vault] = findPda([PROTOCOL_VAULT_SEED]);
+  return [
+    { pubkey: slasher, isSigner: true, isWritable: false },
+    { pubkey: new PublicKey(c.owner), isSigner: false, isWritable: true },
+    { pubkey: cPda, isSigner: false, isWritable: true },
+    { pubkey: vault, isSigner: false, isWritable: true },
+    { pubkey: reward_pool, isSigner: false, isWritable: true },
+    { pubkey: protocol_vault, isSigner: false, isWritable: true },
+    { pubkey: TREASURY, isSigner: false, isWritable: true },
+  ];
+}
+
+async function buildSlashIx(connection, c, slasher) {
+  const [pda] = commitmentPda(c);
+  const keys = commonAccounts(c, slasher, pda);
+  let disc;
+  switch (c.type) {
+    case 'NoSell': disc = IX_DISC.slash_no_sell; break;
+    case 'HoldAbove': disc = IX_DISC.slash_hold_above; break;
+    case 'NoTradeWindow': disc = IX_DISC.slash_no_trade_window; break;
+    case 'AgentGuardian': disc = IX_DISC.slash_agent_guardian; break;
+    default: throw new Error('unknown type ' + c.type);
+  }
+  if (c.type === 'NoSell' || c.type === 'HoldAbove') {
+    const tokenAccts = await getOwnerTokenAccountPubkeys(connection, c.owner, c.target_mint);
+    for (const p of tokenAccts) {
+      keys.push({ pubkey: p, isSigner: false, isWritable: false });
+    }
+  }
+  return new TransactionInstruction({ programId: PROGRAM_ID, keys, data: disc });
+}
+
+async function submitSlash(connection, c, slasherKeypair) {
+  const ix = await buildSlashIx(connection, c, slasherKeypair.publicKey);
+  const tx = new Transaction().add(ix);
+  return await sendAndConfirmTransaction(connection, tx, [slasherKeypair], { commitment: 'confirmed' });
+}
+
+module.exports = { submitSlash, buildSlashIx, commitmentPda };
