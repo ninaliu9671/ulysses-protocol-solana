@@ -8,27 +8,13 @@ The name is from Homer's *Odyssey*: Ulysses had himself tied to the mast so he c
 
 ---
 
-## Honest Statement
-
-> **Ulysses cannot stop you from opening another wallet. No on-chain protocol can.**
->
-> But Ulysses isn't built to outsmart you. It's built to **help the part of you that already wants to keep its promises**.
->
-> When you stake here, you're not trying to fool the protocol — you're tying yourself to the mast. The mast can be untied. **The point is that you chose to tie it.**
->
-> If you want a tool to fool yourself with, this isn't it.
-> If you want a tool to remember who you decided to be, welcome.
-
-*(See `../DESIGN.md` §5 for the full reasoning behind this position, including why the Sybil problem is structurally bounded by the zero-sum redistribution model.)*
-
----
-
 ## Live Demo
 
 | | |
 |---|---|
-| **dApp** | <FILL_BEFORE_SUBMIT — Vercel URL> |
+| **dApp** | [https://ulysses-protocol-solana.vercel.app/](https://ulysses-protocol-solana.vercel.app/) |
 | **Demo Video** | <FILL_BEFORE_SUBMIT — YouTube unlisted URL> |
+| **Watcher health** | [https://ulysses-protocol-solana-production.up.railway.app/health](https://ulysses-protocol-solana-production.up.railway.app/health) — open in any browser to confirm slash bot is live 24/7 |
 | **Network** | Solana Devnet |
 | **Program ID** | [`3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S`](https://explorer.solana.com/address/3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S?cluster=devnet) |
 | **Treasury (Squads multisig)** | [`9CYhSzFPXUQRmKncPtBFuPdRMZwumsexcDUVGaULcQo6`](https://explorer.solana.com/address/9CYhSzFPXUQRmKncPtBFuPdRMZwumsexcDUVGaULcQo6?cluster=devnet) |
@@ -41,7 +27,7 @@ The name is from Homer's *Odyssey*: Ulysses had himself tied to the mast so he c
 Four steps, end to end:
 
 1. **Commit.** Pick one of four discipline modes (see below). The mode encodes a rule about your own future trading behavior.
-2. **Stake.** Lock SOL behind the vow. Stake amount and duration jointly determine your weight in the reward pool: `weight = floor(sqrt(stake_lamports × duration_days))`. The square root suppresses whale dominance and makes splitting strictly worse than committing in one piece. (Math derivation in `../DESIGN.md` Part II.)
+2. **Stake.** Lock SOL behind the vow. Stake amount and duration jointly determine your weight in the reward pool: `weight = floor(sqrt(stake_lamports × duration_days))`. The square root suppresses whale dominance and makes splitting strictly worse than committing in one piece.
 3. **Monitor.** A watcher service tracks the chain. When it detects a violation it submits a `slash_*` transaction on your behalf — the program then verifies the violation on-chain before forfeiting the stake.
 4. **Slash or Claim.** If you broke the rule, your stake flows to the reward pool and is redistributed via an O(1) MasterChef-style accumulator to everyone with active commitments. If you held firm to expiry, you call `claim` and get principal + accumulated yield back.
 
@@ -54,7 +40,17 @@ Four steps, end to end:
 | **⏰ NoTradeWindow** | No signed transactions during a UTC hour window | Per wallet (multi via nonce) | Tx blockTime falls in window |
 | **🛡 AgentGuardian** | Only a designated guardian key may move funds out of the wallet | Per wallet, exclusive | Owner-signed tx decreases SOL/SPL balance |
 
-NoSell / HoldAbove are verified on-chain (the program reads remaining_account token balances). NoTradeWindow / AgentGuardian rely on the watcher's keypair as a trusted signer (see `../DESIGN.md` OQ-6 / OQ-11 for why this is the honest design choice rather than a backdoor).
+NoSell / HoldAbove are verified on-chain (the program reads the user's token accounts directly). NoTradeWindow / AgentGuardian rely on the watcher as a trusted detector — the watcher cannot fabricate violations, only submit slashes the program will accept.
+
+**Coming in future versions.** The four types above are deliberately the smallest set that already exercises every shape of commitment we know how to verify honestly. The roadmap includes:
+
+- **🌅 DCA-Adherence** — commit to buying *at least* X tokens per period; under-buying triggers slash. Inverse of NoSell.
+- **🎯 OracleFloor** — Pyth/Switchboard oracle-driven HoldAbove that uses USD price as the floor instead of token balance.
+- **📅 Streak / Cohort** — multi-user shared commitments where the cohort succeeds or fails together.
+- **🤝 Counter-party Pacts** — two wallets commit to symmetrical rules (e.g. neither sells before T); breaking your half pays the other.
+- **🔁 Renewable** — claim → auto-recommit with same parameters in one transaction.
+
+If you want a type that isn't here, open an issue — the on-chain abstraction (commitment account + reward-pool accumulator + slash authority) is general enough to absorb most ideas.
 
 ### Lifecycle States
 
@@ -96,7 +92,7 @@ NoTradeWindow doesn't require holding any specific token, so it's the fastest pa
 3. Pick a UTC window that includes **right now** (e.g. if it's 10:00 UTC, set window 09:00 → 12:00).
 4. **Duration**: click `7d`. **Stake**: `0.05` SOL.
 5. Click **Create Commitment**, sign in your wallet.
-6. Once the row shows up in **My Commitments** as 🟢 Active, sign any other transaction from this wallet — even a 0.0001 SOL self-transfer in your wallet UI counts.
+6. Once the row shows up in **My Commitments** as 🟢 Active, sign any other transaction from this wallet — even a 0.0001 SOL self-transfer counts.
 7. Within ~60 seconds the watcher detects the violation and submits a slash. Refresh and the row flips to 💀 Slashed; **Siren Graveyard** on `/leaderboard` gets a new red entry.
 
 ### Step 3 · Try NoSell with the demo token (POL)
@@ -113,31 +109,24 @@ If you want to test the on-chain balance check:
 - `📈 HoldAbove` — same as NoSell but you choose a custom floor in tokens. Must be ≤ your current balance.
 - `🛡 AgentGuardian` — paste any pubkey other than your own as the guardian; then send funds *from your own key* — slash.
 
-### Diagnostic
-
-If something doesn't work:
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| Wallet shows mainnet balance | Wallet not on devnet | Phantom → Settings → Developer Settings → Devnet |
-| `Computational budget exceeded` | Stale build cache | Hard refresh |
-| No slash after 90 s | Watcher down or RPC throttled | `<FILL_BEFORE_SUBMIT>/health` should show `last_poll_completed` within 60 s |
-| `BaselineZero` (#6003) on NoSell create | Wallet holds zero of that token | Get the token first (or use NoTradeWindow) |
-
 ---
 
-## What This Protocol Is *NOT*
+## Honest Statement
 
-In the spirit of §5's honest framing:
+> **Ulysses cannot stop you from opening another wallet. No on-chain protocol can.**
+>
+> But Ulysses isn't built to outsmart you. It's built to **help the part of you that already wants to keep its promises**.
+>
+> When you stake here, you're not trying to fool the protocol — you're tying yourself to the mast. The mast can be untied. **The point is that you chose to tie it.**
+>
+> If you want a tool to fool yourself with, this isn't it.
+> If you want a tool to remember who you decided to be, welcome.
 
-- ❌ A tool to help you decide what to invest in — we have no opinion on assets
-- ❌ A tool to prevent fraud or scams — we cannot evaluate token quality
-- ❌ A tool to generate yield from nothing — yield is **redistributed**, not magicked
-- ❌ A tool to force discipline on unwilling users — opt-in only
-- ❌ A tool to outsmart users who want to circumvent it — see `../DESIGN.md` §5
-- ❌ Multi-wallet evasion detection — using a second wallet to sell does not slash your first wallet's commitment, by design
-- ❌ A real Pyth-oracle HoldAbove — the threshold is a token-balance floor, not a USD floor
-- ❌ Mainnet — devnet only for v2.1 hackathon submission
+We state this openly because:
+
+- The honest framing is philosophically stronger than pretending we've solved Sybil. Ulysses sits in the long lineage of voluntary commitment devices, all of which share this limitation by design.
+- The economics work anyway. All rewards come from slashed stakes — a strictly zero-sum redistribution among participants. A Sybil attacker cannot extract value from nothing; they can only put real value in and lose it.
+- Every commitment type we offer is one where Sybil circumvention defeats the user's own purpose. Moving the asset to a second wallet to sell it *is* the violation the user committed against in the first place.
 
 ---
 
@@ -147,13 +136,13 @@ In the spirit of §5's honest framing:
 ulysses-protocol/
 ├── anchor/programs/vault/      # Anchor program (Rust) — 4 types × {create, claim, cancel, slash}
 │   ├── src/state/              # NoSell/HoldAbove/NoTradeWindow/AgentGuardianCommitment + RewardPool
-│   ├── src/instructions/       # Per-type instructions + seeded.rs (devnet-seed feature)
-│   └── src/utils/              # math (integer_sqrt_u128), terminate (settle helper), errors
+│   ├── src/instructions/       # Per-type instructions
+│   └── src/utils/              # integer sqrt, settle helper, errors
 ├── app/                        # Next.js 16 + React 19 + @solana/kit + Tailwind v4
 │   ├── generated/vault/        # Codama client from IDL
 │   ├── components/             # NavBar, hero, commitment form, my-commitments, leaderboard, …
 │   ├── lib/                    # rpc, events, hooks, wallet, commitment-types
-│   ├── docs/                   # /docs route — renders DOCS.md with sticky TOC + KaTeX + SVG diagrams
+│   ├── docs/                   # /docs route — sticky TOC + KaTeX + SVG diagrams
 │   ├── commitment/page.tsx     # /commitment route
 │   └── leaderboard/page.tsx    # /leaderboard route — Hall of Masts + Siren Graveyard
 ├── watcher/                    # Node.js + Express — Helius webhook + 60s polling + startup full-scan
@@ -162,19 +151,10 @@ ulysses-protocol/
 │   └── slash.js                # Submit slash instruction
 └── scripts/
     ├── initialize.mjs          # One-time RewardPool init
-    └── seed-devnet.mjs         # 12 wallets × ~24 commitments seed (DEMO.md §2)
+    └── seed-devnet.mjs         # Devnet leaderboard seed
 ```
 
-Upper-level docs (philosophy, math, frontend spec, demo plan, x402 notes) live in the parent directory:
-
-- `../DESIGN.md` — product philosophy, mechanism design, formal proofs, OQ-1..OQ-18 implementation decisions
-- `../FRONTEND.md` — frontend spec: routes, panels, copy, parameter tables
-- `../DEMO.md` — 3-min video script, 12-wallet seed plan (24 commitments), judge try-it guide
-- `../x402-notes.md` — x402 protocol background and integration posture
-- `../PLAN_AGENT.md` — phased implementation plan
-- `../PLAN_HUMAN.md` — human-only tasks (wallets, Squads, deploys, demo recording)
-
-The in-app `/docs` page is a polished, public-facing version of the protocol's mechanism explanation.
+The in-app `/docs` route is the public-facing protocol documentation (mechanism, math, lifecycle).
 
 ---
 
@@ -205,19 +185,10 @@ cd watcher && npm install && node index.js
 # Health endpoint: http://localhost:3001/health
 ```
 
-The `devnet-seed` Cargo feature gates `seed_create_*` instructions for backdated seed data (see `../DESIGN.md` OQ-15). Mainnet builds do not contain this code path.
-
-```bash
-cd anchor
-anchor build                         # default — no seed path
-anchor build -- --features devnet-seed   # seeded build for devnet population
-anchor deploy --provider.cluster devnet --provider.wallet ~/solana-dev-keypair.json
-```
-
 ---
 
 ## Status
 
 **Devnet only. v2.1 hackathon submission.**
 
-Deferred to v2.2: permissionless slash + 5% bounty, Voided termination path with strength-based replacement, oracle-driven HoldAbove, mainnet audit + governance.
+Deferred to v2.2: permissionless slash + 5% bounty, Voided termination path with strength-based replacement, oracle-driven HoldAbove, mainnet audit + governance, the additional commitment types listed under *Coming in future versions* above.
