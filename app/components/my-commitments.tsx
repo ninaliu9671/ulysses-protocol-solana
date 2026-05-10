@@ -61,9 +61,10 @@ export function MyCommitmentsSection() {
 
   function pendingYield(row: Row): bigint {
     if (!metrics) return 0n;
+    // On-chain reward_debt is stored as `weight * acc / PRECISION` already in
+    // lamports — do NOT divide it again here.
     const accumulated = (row.weight * metrics.accRewardPerWeight) / PRECISION;
-    const debt = row.rewardDebt / PRECISION;
-    return accumulated > debt ? accumulated - debt : 0n;
+    return accumulated > row.rewardDebt ? accumulated - row.rewardDebt : 0n;
   }
 
   function progressPct(row: Row): number {

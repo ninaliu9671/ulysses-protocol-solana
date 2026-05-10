@@ -34,9 +34,10 @@ export function LeaderboardSection({ limit }: { limit?: number } = {}) {
       const g = groups.get(c.owner) ?? { items: [], stake: 0n, yieldL: 0n };
       g.items.push(c);
       g.stake += c.stakeAmount;
+      // On-chain reward_debt is stored as `weight * acc / PRECISION` already
+      // in lamports — don't divide it again.
       const accumulated = (c.weight * acc) / PRECISION;
-      const debt = c.rewardDebt / PRECISION;
-      g.yieldL += accumulated > debt ? accumulated - debt : 0n;
+      g.yieldL += accumulated > c.rewardDebt ? accumulated - c.rewardDebt : 0n;
       groups.set(c.owner, g);
     }
 
