@@ -58,6 +58,9 @@ async function fetchAll(rpcUrl: string): Promise<AllCommitment[]> {
 export function useAllCommitments(): AllCommitment[] | undefined {
   const { cluster } = useCluster();
   const url = getClusterUrl(cluster);
-  const { data } = useSWR(["all-commitments", url], () => fetchAll(url), { refreshInterval: 15_000 });
+  const { data } = useSWR(["all-commitments", url], () => fetchAll(url), {
+    refreshInterval: 60_000,
+    dedupingInterval: 30_000,
+  });
   return data;
 }

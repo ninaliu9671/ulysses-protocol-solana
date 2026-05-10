@@ -134,7 +134,7 @@ export function useProtocolMetrics(): ProtocolMetrics | undefined {
   const { data } = useSWR(
     ["protocol-metrics", url],
     () => fetchMetrics(url),
-    { refreshInterval: 10_000 },
+    { refreshInterval: 60_000, dedupingInterval: 30_000 },
   );
   return data;
 }

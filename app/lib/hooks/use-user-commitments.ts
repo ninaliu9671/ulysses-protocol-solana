@@ -100,7 +100,7 @@ export function useUserCommitments(owner: string | undefined): UserCommitmentsRe
   const { data, mutate } = useSWR(
     owner ? ["user-commitments", url, owner] : null,
     () => fetchByOwner(url, owner!),
-    { refreshInterval: 5_000 },
+    { refreshInterval: 30_000, dedupingInterval: 10_000 },
   );
   return {
     noSell: data?.noSell ?? [],

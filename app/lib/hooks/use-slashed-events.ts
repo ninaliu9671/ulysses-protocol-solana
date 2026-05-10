@@ -16,7 +16,7 @@ export function useSlashedEvents(limit = 50): { events: SlashedEvent[] | undefin
   const { data, isLoading } = useSWR(
     ["slashed-events", url, limit],
     () => fetchSlashedEvents(url, limit),
-    { refreshInterval: 30_000, dedupingInterval: 15_000 },
+    { refreshInterval: 120_000, dedupingInterval: 60_000 },
   );
   return { events: data, isLoading };
 }
