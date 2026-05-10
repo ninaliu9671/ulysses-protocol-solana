@@ -42,13 +42,13 @@ Four steps, end to end:
 
 NoSell / HoldAbove are verified on-chain (the program reads the user's token accounts directly). NoTradeWindow / AgentGuardian rely on the watcher as a trusted detector — the watcher cannot fabricate violations, only submit slashes the program will accept.
 
-**Coming in future versions.** The four types above are deliberately the smallest set that already exercises every shape of commitment we know how to verify honestly. The roadmap includes:
+**Coming in future versions.** The four types above are deliberately the smallest set that already exercises every shape of commitment we know how to verify honestly. The roadmap includes more single-user rules in the same shape:
 
-- **🌅 DCA-Adherence** — commit to buying *at least* X tokens per period; under-buying triggers slash. Inverse of NoSell.
-- **🎯 OracleFloor** — Pyth/Switchboard oracle-driven HoldAbove that uses USD price as the floor instead of token balance.
-- **📅 Streak / Cohort** — multi-user shared commitments where the cohort succeeds or fails together.
-- **🤝 Counter-party Pacts** — two wallets commit to symmetrical rules (e.g. neither sells before T); breaking your half pays the other.
-- **🔁 Renewable** — claim → auto-recommit with same parameters in one transaction.
+- **🚫 NoBuy** — symmetric to NoSell: target token balance must not increase.
+- **⏱ MaxTradesPerDay(N)** — at most N trades on the target mint per UTC day.
+- **❄️ CooldownBetweenTrades(secs)** — minimum interval between two trades on the target mint.
+- **🛟 MustExitBelow(mint, threshold)** — must sell once balance drops below a threshold.
+- **🪜 MaxLeverage(x)** — leverage on perp protocols (Drift / Mango / Jupiter Perps) must stay below x× while the commitment is active.
 
 If you want a type that isn't here, open an issue — the on-chain abstraction (commitment account + reward-pool accumulator + slash authority) is general enough to absorb most ideas.
 
