@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { address, type Address } from "@solana/kit";
+import { address, type Address, type AccountRole } from "@solana/kit";
 import { toast } from "sonner";
 import { useWallet } from "../lib/wallet/context";
 import { useSendTransaction } from "../lib/hooks/use-send-transaction";
 import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
 import { useUserCommitments } from "../lib/hooks/use-user-commitments";
+import { useCluster } from "./cluster-context";
+import { getClusterUrl } from "../lib/solana-client";
+import { rpcCall } from "../lib/rpc";
 import {
   getCreateNoSellInstructionAsync,
   getCreateHoldAboveInstructionAsync,
@@ -32,12 +35,33 @@ function integerSqrt(n: bigint): bigint {
   return x;
 }
 
+// Fetches all SPL token accounts owned by `owner` for `mint`. Returns the
+// list of token-account pubkeys, used as remaining_accounts so the program
+// can sum them as the baseline for NoSell / HoldAbove. Empty array signals
+// the wallet holds zero of this token (program will reject as BaselineZero).
+async function fetchOwnerTokenAccounts(
+  rpcUrl: string,
+  owner: string,
+  mint: string,
+): Promise<string[]> {
+  const result = await rpcCall<{
+    value: { pubkey: string }[];
+  }>(
+    rpcUrl,
+    "getTokenAccountsByOwner",
+    [owner, { mint }, { encoding: "base64" }],
+  );
+  return (result?.value ?? []).map((v) => v.pubkey);
+}
+
 export function CreateCommitmentForm() {
   const { signer } = useWallet();
   const walletAddress = signer?.address;
   const { send, isSending } = useSendTransaction();
   const metrics = useProtocolMetrics();
   const userCommits = useUserCommitments(walletAddress);
+  const { cluster } = useCluster();
+  const rpcUrl = getClusterUrl(cluster);
 
   const [type, setType] = useState<CommitmentTypeKey>("NoSell");
   const [targetMint, setTargetMint] = useState("");
@@ -125,25 +149,61 @@ export function CreateCommitmentForm() {
       switch (type) {
         case "NoSell": {
           if (!targetMint) throw new Error("Target mint required");
-          ix = await getCreateNoSellInstructionAsync({
+          const tokenAccounts = await fetchOwnerTokenAccounts(
+            rpcUrl,
+            signer.address,
+            targetMint,
+          );
+          if (tokenAccounts.length === 0) {
+            throw new Error("You hold zero of this token. Get some first or pick a different mint.");
+          }
+          const baseIx = await getCreateNoSellInstructionAsync({
             owner: signer,
             targetMint: address(targetMint),
             stakeAmount: stakeLamports,
             durationDays: days,
           });
+          ix = {
+            ...baseIx,
+            accounts: [
+              ...baseIx.accounts,
+              ...tokenAccounts.map((pk) => ({
+                address: address(pk),
+                role: 0 as AccountRole, // ReadonlyAccount
+              })),
+            ],
+          };
           break;
         }
         case "HoldAbove": {
           if (!targetMint) throw new Error("Target mint required");
           const floorBig = BigInt(Math.floor(parseFloat(floorAmount || "0")));
           if (floorBig <= 0n) throw new Error("Floor amount required");
-          ix = await getCreateHoldAboveInstructionAsync({
+          const tokenAccounts = await fetchOwnerTokenAccounts(
+            rpcUrl,
+            signer.address,
+            targetMint,
+          );
+          if (tokenAccounts.length === 0) {
+            throw new Error("You hold zero of this token. Get some first or pick a different mint.");
+          }
+          const baseIx = await getCreateHoldAboveInstructionAsync({
             owner: signer,
             targetMint: address(targetMint),
             stakeAmount: stakeLamports,
             durationDays: days,
             floorAmount: floorBig,
           });
+          ix = {
+            ...baseIx,
+            accounts: [
+              ...baseIx.accounts,
+              ...tokenAccounts.map((pk) => ({
+                address: address(pk),
+                role: 0 as AccountRole,
+              })),
+            ],
+          };
           break;
         }
         case "NoTradeWindow": {
