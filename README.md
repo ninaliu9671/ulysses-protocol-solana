@@ -13,7 +13,7 @@ The name is from Homer's *Odyssey*: Ulysses had himself tied to the mast so he c
 | | |
 |---|---|
 | **dApp** | [https://ulysses-protocol-solana.vercel.app/](https://ulysses-protocol-solana.vercel.app/) |
-| **Demo Video** | <FILL_BEFORE_SUBMIT — YouTube unlisted URL> |
+| **Demo Video** | https://www.youtube.com/watch?v=KrhYt-MnYGM |
 | **Watcher health** | [https://ulysses-protocol-solana-production.up.railway.app/health](https://ulysses-protocol-solana-production.up.railway.app/health) — open in any browser to confirm slash bot is live 24/7 |
 | **Network** | Solana Devnet |
 | **Program ID** | [`3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S`](https://explorer.solana.com/address/3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S?cluster=devnet) |
