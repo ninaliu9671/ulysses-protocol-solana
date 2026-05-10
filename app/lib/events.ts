@@ -12,10 +12,18 @@ async function eventDiscriminator(name: string): Promise<Uint8Array> {
   return new Uint8Array(hash).slice(0, 8);
 }
 
-let cachedDisc: { slashed?: Uint8Array; created?: Uint8Array; claimed?: Uint8Array; cancelled?: Uint8Array } = {};
+const cachedDisc: { slashed?: Uint8Array; created?: Uint8Array; claimed?: Uint8Array; cancelled?: Uint8Array } = {};
 async function getSlashedDisc(): Promise<Uint8Array> {
   if (!cachedDisc.slashed) cachedDisc.slashed = await eventDiscriminator("Slashed");
   return cachedDisc.slashed;
+}
+async function getClaimedDisc(): Promise<Uint8Array> {
+  if (!cachedDisc.claimed) cachedDisc.claimed = await eventDiscriminator("Claimed");
+  return cachedDisc.claimed;
+}
+async function getCancelledDisc(): Promise<Uint8Array> {
+  if (!cachedDisc.cancelled) cachedDisc.cancelled = await eventDiscriminator("Cancelled");
+  return cachedDisc.cancelled;
 }
 
 function readU64LE(b: Uint8Array, o: number): bigint {
@@ -132,10 +140,81 @@ export async function fetchSlashedEvents(
 }
 
 /**
- * Total slashed (sum of principal) from all historical Slashed events.
- * Returns lamports.
+ * Termination event covers Slashed / Cancelled / Claimed.
+ * Each event payload: commitment(32) + owner(32) + principal(8). Claimed
+ * additionally has yield_paid(8) but we don't need it for the my-commitments
+ * status display.
  */
-export async function fetchTotalSlashed(rpcUrl: string): Promise<bigint> {
-  const events = await fetchSlashedEvents(rpcUrl, 1000);
-  return events.reduce((sum, e) => sum + e.principal, 0n);
+export type TerminationKind = "Slashed" | "Cancelled" | "Claimed";
+
+export type TerminationEvent = {
+  kind: TerminationKind;
+  signature: string;
+  blockTime: number | null;
+  commitment: string; // PDA pubkey of the closed commitment
+  owner: string;
+  principal: bigint; // for Claimed: returned-to-owner; for Slashed/Cancelled: forfeited
+  yieldPaid?: bigint; // Claimed only
+};
+
+export async function fetchTerminationEventsForOwner(
+  rpcUrl: string,
+  owner: string,
+  limit = 200,
+): Promise<TerminationEvent[]> {
+  const [slashedDisc, cancelledDisc, claimedDisc] = await Promise.all([
+    getSlashedDisc(),
+    getCancelledDisc(),
+    getClaimedDisc(),
+  ]);
+
+  const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
+    owner,
+    { limit },
+  ]);
+  if (!sigs?.length) return [];
+
+  const events: TerminationEvent[] = [];
+  const BATCH = 3;
+  for (let i = 0; i < sigs.length; i += BATCH) {
+    const batch = sigs.slice(i, i + BATCH);
+    const txs = await Promise.all(
+      batch.map((s) =>
+        rpcCall<TxMeta>(rpcUrl, "getTransaction", [
+          s.signature,
+          { encoding: "json", maxSupportedTransactionVersion: 0 },
+        ]).catch(() => null),
+      ),
+    );
+    for (let j = 0; j < txs.length; j++) {
+      const tx = txs[j];
+      if (!tx?.meta?.logMessages) continue;
+      for (const log of tx.meta.logMessages) {
+        const m = log.match(/^Program data: (.+)$/);
+        if (!m) continue;
+        const bytes = base64ToBytes(m[1]);
+        if (bytes.length < 8 + 32 + 32 + 8) continue;
+        let kind: TerminationKind | null = null;
+        if (eq(bytes.slice(0, 8), slashedDisc)) kind = "Slashed";
+        else if (eq(bytes.slice(0, 8), cancelledDisc)) kind = "Cancelled";
+        else if (eq(bytes.slice(0, 8), claimedDisc)) kind = "Claimed";
+        if (!kind) continue;
+        const commitment = bytes32ToBase58(bytes.slice(8, 40));
+        const ownerInEvent = bytes32ToBase58(bytes.slice(40, 72));
+        if (ownerInEvent !== owner) continue;
+        const principal = readU64LE(bytes, 72);
+        const yieldPaid = kind === "Claimed" && bytes.length >= 88 ? readU64LE(bytes, 80) : undefined;
+        events.push({
+          kind,
+          signature: batch[j].signature,
+          blockTime: tx.blockTime,
+          commitment,
+          owner: ownerInEvent,
+          principal,
+          yieldPaid,
+        });
+      }
+    }
+  }
+  return events;
 }

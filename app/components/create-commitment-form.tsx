@@ -15,8 +15,13 @@ import {
   getCreateHoldAboveInstructionAsync,
   getCreateNoTradeWindowInstructionAsync,
   getCreateAgentGuardianInstructionAsync,
+  findNoSellPdaPda,
+  findCreateHoldAboveCommitmentPda,
+  findCreateNoTradeWindowCommitmentPda,
+  findCommitmentPda,
 } from "../generated/vault";
 import { COMMITMENT_TYPES, TYPE_BY_KEY, type CommitmentTypeKey } from "../lib/commitment-types";
+import { saveCachedCommitment } from "../lib/my-commitments-cache";
 
 const DURATION_PRESETS = [7, 30, 90, 180, 365];
 
@@ -146,6 +151,9 @@ export function CreateCommitmentForm() {
       if (!days || days < 1 || days > 365) throw new Error("Duration must be 1-365 days");
 
       let ix;
+      // Capture-once values needed both for ix construction and for the
+      // post-success cache write (so PDA derivation matches).
+      const nonceForCache: bigint = BigInt(Date.now());
       switch (type) {
         case "NoSell": {
           if (!targetMint) throw new Error("Target mint required");
@@ -211,14 +219,13 @@ export function CreateCommitmentForm() {
           const eh = parseInt(windowEnd, 10);
           if (sh < 0 || sh > 23 || eh < 0 || eh > 23) throw new Error("Hours must be 0-23");
           if (sh === eh) throw new Error("Window cannot be 0 hours");
-          const nonce = BigInt(Date.now());
           ix = await getCreateNoTradeWindowInstructionAsync({
             owner: signer,
             stakeAmount: stakeLamports,
             durationDays: days,
             windowStartHour: sh,
             windowEndHour: eh,
-            nonce,
+            nonce: nonceForCache,
           });
           break;
         }
@@ -235,6 +242,60 @@ export function CreateCommitmentForm() {
       }
       const sig = await send({ instructions: [ix] });
       toast.success(`Commitment created: ${sig.slice(0, 8)}…`);
+
+      // Cache the commitment so my-commitments can still display it after
+      // it terminates (Slashed/Cancelled/Claimed close the on-chain account).
+      try {
+        const owner = signer.address;
+        const nowSec = Math.floor(Date.now() / 1000);
+        let pubkey: string | null = null;
+        const baseCache = {
+          owner,
+          stakeLamports: stakeLamports.toString(),
+          durationDays: days,
+          createdAt: nowSec,
+        };
+        if (type === "NoSell") {
+          const [pda] = await findNoSellPdaPda({ owner, targetMint: address(targetMint) });
+          pubkey = pda;
+          saveCachedCommitment({ ...baseCache, pubkey, type, targetMint });
+        } else if (type === "HoldAbove") {
+          const [pda] = await findCreateHoldAboveCommitmentPda({ owner, targetMint: address(targetMint) });
+          pubkey = pda;
+          saveCachedCommitment({
+            ...baseCache,
+            pubkey,
+            type,
+            targetMint,
+            floorAmount: BigInt(Math.floor(parseFloat(floorAmount || "0"))).toString(),
+          });
+        } else if (type === "NoTradeWindow") {
+          const sh = parseInt(windowStart, 10);
+          const eh = parseInt(windowEnd, 10);
+          const [pda] = await findCreateNoTradeWindowCommitmentPda({ owner, nonce: nonceForCache });
+          pubkey = pda;
+          saveCachedCommitment({
+            ...baseCache,
+            pubkey,
+            type,
+            windowStartHour: sh,
+            windowEndHour: eh,
+            nonce: nonceForCache.toString(),
+          });
+        } else if (type === "AgentGuardian") {
+          const [pda] = await findCommitmentPda({ owner });
+          pubkey = pda;
+          saveCachedCommitment({
+            ...baseCache,
+            pubkey,
+            type,
+            guardianPubkey: guardian,
+          });
+        }
+      } catch {
+        /* cache best-effort; failure here doesn't affect the on-chain commitment */
+      }
+
       userCommits.refresh?.();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
