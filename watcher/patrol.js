@@ -5,8 +5,17 @@ const { fetchAllCommitments, getOwnerTokenBalanceAggregate } = require('./chain'
 const { submitSlash } = require('./slash');
 
 async function checkBalanceViolation(connection, c) {
-  const balance = await getOwnerTokenBalanceAggregate(connection, c.owner, c.target_mint);
-  return balance < c.floor_amount;
+  try {
+    const balance = await getOwnerTokenBalanceAggregate(connection, c.owner, c.target_mint);
+    return { violated: balance < c.floor_amount };
+  } catch (err) {
+    // Mint doesn't actually exist (e.g. seed-script fake pubkey). Treat as
+    // unknown — never slash. Caller will see violated=false.
+    if (err.message?.includes("could not find mint")) {
+      return { violated: false, skipped: true };
+    }
+    throw err;
+  }
 }
 
 // Returns true if any signed-by-owner tx has blockTime falling within the
@@ -66,10 +75,8 @@ async function checkAgentGuardianViolation(connection, c) {
 async function checkViolation(connection, c) {
   switch (c.type) {
     case 'NoSell':
-    case 'HoldAbove': {
-      const v = await checkBalanceViolation(connection, c);
-      return { violated: v };
-    }
+    case 'HoldAbove':
+      return await checkBalanceViolation(connection, c);
     case 'NoTradeWindow':
       return await checkNoTradeWindowViolation(connection, c);
     case 'AgentGuardian':

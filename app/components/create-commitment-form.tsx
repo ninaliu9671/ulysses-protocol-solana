@@ -59,6 +59,21 @@ async function fetchOwnerTokenAccounts(
   return (result?.value ?? []).map((v) => v.pubkey);
 }
 
+// Fetch mint decimals so we can convert user-friendly token counts ("7000")
+// into raw on-chain units (7000 * 10^6 for a 6-decimal mint).
+async function fetchMintDecimals(rpcUrl: string, mint: string): Promise<number> {
+  const res = await rpcCall<{
+    value: { data: { parsed: { info: { decimals: number } } } } | null;
+  }>(
+    rpcUrl,
+    "getAccountInfo",
+    [mint, { encoding: "jsonParsed" }],
+  );
+  const d = res?.value?.data?.parsed?.info?.decimals;
+  if (typeof d !== "number") throw new Error("Could not read mint decimals — is this a real mint address?");
+  return d;
+}
+
 export function CreateCommitmentForm() {
   const { signer } = useWallet();
   const walletAddress = signer?.address;
@@ -185,8 +200,10 @@ export function CreateCommitmentForm() {
         }
         case "HoldAbove": {
           if (!targetMint) throw new Error("Target mint required");
-          const floorBig = BigInt(Math.floor(parseFloat(floorAmount || "0")));
-          if (floorBig <= 0n) throw new Error("Floor amount required");
+          const floorTokens = parseFloat(floorAmount || "0");
+          if (!(floorTokens > 0)) throw new Error("Floor amount required");
+          const decimals = await fetchMintDecimals(rpcUrl, targetMint);
+          const floorBig = BigInt(Math.floor(floorTokens * 10 ** decimals));
           const tokenAccounts = await fetchOwnerTokenAccounts(
             rpcUrl,
             signer.address,
@@ -336,11 +353,11 @@ export function CreateCommitmentForm() {
         </Field>
       )}
       {type === "HoldAbove" && (
-        <Field label="FLOOR AMOUNT (raw token units, must be > 0 and ≤ baseline)">
+        <Field label="FLOOR AMOUNT (in tokens, must be > 0 and ≤ your current balance)">
           <input
             value={floorAmount}
             onChange={(e) => setFloorAmount(e.target.value.trim())}
-            placeholder="e.g. 100000"
+            placeholder="e.g. 7000"
             className="w-full px-3 py-2 rounded"
             style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
           />
