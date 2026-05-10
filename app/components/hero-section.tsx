@@ -1,7 +1,7 @@
 "use client";
 
 import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
-import { useSlashedEvents } from "../lib/hooks/use-slashed-events";
+import { useProtocolStats } from "../lib/hooks/use-protocol-stats";
 
 export function HeroSection() {
   return (
@@ -73,9 +73,9 @@ export function HeroSection() {
           >
             Bind yourself
             <br />
-            before temptation
+            before the
             <br />
-            arrives.
+            Sirens sing.
           </h1>
 
           {/* Description */}
@@ -88,9 +88,10 @@ export function HeroSection() {
               marginBottom: "2rem",
             }}
           >
-            Stake tokens. Commit to not buying a specific token for a period of
-            time. If you break your vow, you get slashed. If you stay
-            disciplined, you earn yield from others&apos; failures.
+            Ulysses isn&apos;t built to outsmart you. It&apos;s built to help the
+            part of you that already wants to keep its promises. Stake on-chain,
+            bind your future self, and turn other people&apos;s impulse into your
+            reward.
           </p>
 
           {/* CTAs */}
@@ -134,15 +135,17 @@ export function HeroSection() {
 
 function StatsBar() {
   const metrics = useProtocolMetrics();
-  const { events: slashedEvents } = useSlashedEvents(50);
+  const { stats: protocolStats } = useProtocolStats();
 
   const fmt = (lamports: bigint | undefined): string =>
     lamports === undefined ? "—" : (Number(lamports) / 1e9).toFixed(2) + " SOL";
 
-  const totalSlashed =
-    slashedEvents === undefined
-      ? undefined
-      : slashedEvents.reduce((s, e) => s + e.principal, 0n);
+  const totalSlashed = protocolStats
+    ? BigInt(protocolStats.total_slashed_lamports)
+    : undefined;
+  const totalRedistributed = protocolStats
+    ? BigInt(protocolStats.total_redistributed_lamports)
+    : undefined;
 
   const stats = [
     { icon: <VaultIcon />, value: fmt(metrics?.activeStakedLamports), label: "Active Staked" },
@@ -152,7 +155,7 @@ function StatsBar() {
       label: "Active Commitments",
     },
     { icon: <RewardIcon />, value: fmt(totalSlashed), label: "Total Slashed" },
-    { icon: <RewardIcon />, value: fmt(metrics?.totalRedistributedLamports), label: "Total Redistributed" },
+    { icon: <RewardIcon />, value: fmt(totalRedistributed), label: "Total Redistributed" },
   ];
 
   return (

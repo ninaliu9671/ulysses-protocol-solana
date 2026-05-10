@@ -37,6 +37,19 @@ export async function fetchWatcherHistory(): Promise<WatcherSlashEvent[]> {
   return res.json();
 }
 
+export interface WatcherStats {
+  total_slashed_lamports: string;
+  total_redistributed_lamports: string;
+  history_backfill_done: boolean;
+  last_scan_completed: number | null;
+}
+
+export async function fetchWatcherStats(): Promise<WatcherStats> {
+  const res = await fetch(`${WATCHER_URL}/stats`);
+  if (!res.ok) throw new Error("Watcher /stats failed");
+  return res.json();
+}
+
 // Parse commitment_type JSON field safely
 export function parseCommitmentType(raw: string): { type: string } {
   try { return JSON.parse(raw); } catch { return { type: "Unknown" }; }

@@ -11,6 +11,7 @@ const db = require('./db');
 const { fetchAllCommitments } = require('./chain');
 const { patrol, checkViolation } = require('./patrol');
 const { submitSlash } = require('./slash');
+const { runScan } = require('./event-scanner');
 
 const RPC_URL = process.env.HELIUS_RPC_URL ?? 'https://api.devnet.solana.com';
 const PORT = process.env.PORT ?? 3001;
@@ -41,6 +42,21 @@ db.init();
 let lastWebhookSeen = null;
 let lastPollCompleted = null;
 let lastFullScanCompleted = null;
+let lastEventScanCompleted = null;
+let eventScanInFlight = false;
+
+async function runEventScan() {
+  if (eventScanInFlight) return;
+  eventScanInFlight = true;
+  try {
+    await runScan(connection, db);
+    lastEventScanCompleted = Date.now();
+  } catch (err) {
+    console.error('[SCANNER] error:', err.message);
+  } finally {
+    eventScanInFlight = false;
+  }
+}
 
 async function runPatrol() {
   if (!slasherKeypair) return;
@@ -126,6 +142,7 @@ app.get('/health', async (req, res) => {
     last_webhook_seen: lastWebhookSeen,
     last_poll_completed: lastPollCompleted,
     last_full_scan_completed: lastFullScanCompleted,
+    last_event_scan_completed: lastEventScanCompleted,
     rpc_url: RPC_URL,
   });
 });
@@ -152,7 +169,20 @@ app.get('/history', (req, res) => {
   res.json(db.getRecentSlashes(50));
 });
 
+app.get('/stats', (req, res) => {
+  const t = db.getTotals();
+  res.json({
+    total_slashed_lamports: t.total_slashed_lamports,
+    total_redistributed_lamports: t.total_redistributed_lamports,
+    history_backfill_done: t.history_backfill_done,
+    last_scan_completed: t.last_scan_completed,
+  });
+});
+
 recoverOnStartup().then(() => {
   setInterval(runPatrol, 60_000);
+  // Kick off event-scanner backfill in background; do not block server startup.
+  runEventScan();
+  setInterval(runEventScan, 60_000);
   app.listen(PORT, () => console.log(`[WATCHER] listening on :${PORT}`));
 });
