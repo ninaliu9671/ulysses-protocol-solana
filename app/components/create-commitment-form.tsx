@@ -456,7 +456,7 @@ export function CreateCommitmentForm() {
       </Field>
 
       {/* Stake */}
-      <Field label="STAKE AMOUNT (SOL, ≥ 100)">
+      <Field label="STAKE AMOUNT (SOL ≥ 100)">
         <input
           value={stakeSol}
           onChange={(e) => setStakeSol(e.target.value.trim())}
