@@ -17,7 +17,7 @@ export type CachedCommitment = {
   owner: string;
   type: CommitmentTypeKey;
   stakeLamports: string; // bigint stringified
-  durationDays: number;
+  durationSeconds: number;
   createdAt: number; // unix seconds
   // Per-type extras
   targetMint?: string;

@@ -96,7 +96,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
       pubkey: c.pubkey,
       owner: c.owner,
       stakeLamports: c.stakeAmount.toString(),
-      durationDays: Number((c.expiresAt - c.createdAt) / 86400n),
+      durationSeconds: Number(c.expiresAt - c.createdAt),
       createdAt: Number(c.createdAt),
     });
     for (const c of live.noSell) {
@@ -231,7 +231,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
       const term = termByPubkey.get(c.pubkey);
       const localTerm = localTermByPubkey.get(c.pubkey);
       const stakeLamports = BigInt(c.stakeLamports);
-      const expiresAt = BigInt(c.createdAt) + BigInt(c.durationDays) * 86400n;
+      const expiresAt = BigInt(c.createdAt) + BigInt(c.durationSeconds);
       // Priority: chain event > local optimistic > "Processing" (account gone but not indexed yet)
       const status: CommitmentStatus = term ? term.kind : localTerm ? localTerm.kind : "Processing";
       out.push({
