@@ -22,15 +22,16 @@ import {
   getCancelAgentGuardianInstructionAsync,
 } from "../generated/vault";
 import { TYPE_BY_KEY } from "../lib/commitment-types";
+import { saveLocalTermination } from "../lib/my-commitments-cache";
 
 const PRECISION = 1_000_000_000n;
 
 const STATUS_BADGES: Record<CommitmentStatus, { emoji: string; label: string; color: string }> = {
-  Active: { emoji: "🟢", label: "Active", color: "#86efac" },
-  Unlockable: { emoji: "🟡", label: "Unlockable", color: "#fcd34d" },
-  Slashed: { emoji: "💀", label: "Slashed", color: "#fca5a5" },
-  Cancelled: { emoji: "⚫", label: "Cancelled", color: "#9ca3af" },
-  Claimed: { emoji: "✅", label: "Claimed", color: "#86efac" },
+  Processing: { emoji: "🟡", label: "Processing", color: "#fcd34d" },
+  Claimable:  { emoji: "🟢", label: "Claimable",  color: "#86efac" },
+  Slashed:    { emoji: "💀", label: "Failed",      color: "#fca5a5" },
+  Cancelled:  { emoji: "⚫", label: "Cancelled",   color: "#9ca3af" },
+  Claimed:    { emoji: "🎉", label: "Claimed",     color: "#86efac" },
 };
 
 function labelFor(row: MergedCommitment): string {
@@ -83,6 +84,7 @@ export function MyCommitmentsSection() {
       else ix = await getClaimAgentGuardianInstructionAsync({ owner: signer });
       const sig = await send({ instructions: [ix] });
       toast.success(`Claimed: ${sig.slice(0, 8)}…`);
+      if (owner) saveLocalTermination(owner, { pubkey: row.pubkey, kind: "Claimed", signature: sig });
       refresh();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -105,6 +107,7 @@ export function MyCommitmentsSection() {
       else ix = await getCancelAgentGuardianInstructionAsync({ owner: signer, treasury });
       const sig = await send({ instructions: [ix] });
       toast.success(`Cancelled: ${sig.slice(0, 8)}…`);
+      if (owner) saveLocalTermination(owner, { pubkey: row.pubkey, kind: "Cancelled", signature: sig });
       refresh();
       setConfirmCancelPubkey(null);
       setConfirmInput("");
@@ -170,7 +173,7 @@ export function MyCommitmentsSection() {
                 </div>
                 {!isTerminal && (
                   <div className="flex gap-2">
-                    {row.status === "Unlockable" ? (
+                    {row.status === "Claimable" ? (
                       <button
                         onClick={() => handleClaim(row)}
                         disabled={isSending}

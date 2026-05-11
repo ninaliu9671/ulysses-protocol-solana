@@ -1,15 +1,15 @@
 "use client";
 
 import useSWR from "swr";
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { useCluster } from "../../components/cluster-context";
 import { getClusterUrl } from "../solana-client";
 import { useUserCommitments } from "./use-user-commitments";
 import { fetchTerminationEventsForOwner, type TerminationKind } from "../events";
-import { loadCachedCommitments, type CachedCommitment } from "../my-commitments-cache";
+import { loadCachedCommitments, saveCachedCommitment, loadLocalTerminations, type CachedCommitment } from "../my-commitments-cache";
 import type { CommitmentTypeKey } from "../commitment-types";
 
-export type CommitmentStatus = "Active" | "Unlockable" | TerminationKind;
+export type CommitmentStatus = "Processing" | "Claimable" | TerminationKind;
 
 export type MergedCommitment = {
   pubkey: string;
@@ -56,6 +56,33 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
     [owner, terminations], // re-read after termination poll so freshly-cached creates show up
   );
 
+  // Sync live commitments to localStorage so terminated entries survive account closure.
+  // This is a safety net: if the creation-time cache write failed silently, the commitment
+  // will still appear in history once it's been seen here at least once while active.
+  useEffect(() => {
+    if (!owner) return;
+    const base = (c: { pubkey: string; owner: string; stakeAmount: bigint; createdAt: bigint; expiresAt: bigint }) => ({
+      pubkey: c.pubkey,
+      owner: c.owner,
+      stakeLamports: c.stakeAmount.toString(),
+      durationDays: Number((c.expiresAt - c.createdAt) / 86400n),
+      createdAt: Number(c.createdAt),
+    });
+    for (const c of live.noSell) {
+      saveCachedCommitment({ ...base(c), type: "NoSell", targetMint: c.targetMint, floorAmount: c.floorAmount.toString() });
+    }
+    for (const c of live.holdAbove) {
+      saveCachedCommitment({ ...base(c), type: "HoldAbove", targetMint: c.targetMint, floorAmount: c.floorAmount.toString() });
+    }
+    for (const c of live.noTradeWindow) {
+      saveCachedCommitment({ ...base(c), type: "NoTradeWindow", windowStartHour: c.windowStartHour, windowEndHour: c.windowEndHour, nonce: c.nonce.toString() });
+    }
+    if (live.agentGuardian) {
+      const c = live.agentGuardian;
+      saveCachedCommitment({ ...base(c), type: "AgentGuardian", guardianPubkey: c.guardianPubkey });
+    }
+  }, [owner, live]);
+
   const rows = useMemo<MergedCommitment[]>(() => {
     const now = BigInt(Math.floor(Date.now() / 1000));
     const out: MergedCommitment[] = [];
@@ -64,7 +91,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
     // 1. Active rows from chain
     for (const c of live.noSell) {
       seenPubkeys.add(c.pubkey);
-      const status: CommitmentStatus = now >= c.expiresAt ? "Unlockable" : "Active";
+      const status: CommitmentStatus = now >= c.expiresAt ? "Claimable" : "Processing";
       out.push({
         pubkey: c.pubkey,
         owner: c.owner,
@@ -81,7 +108,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
     }
     for (const c of live.holdAbove) {
       seenPubkeys.add(c.pubkey);
-      const status: CommitmentStatus = now >= c.expiresAt ? "Unlockable" : "Active";
+      const status: CommitmentStatus = now >= c.expiresAt ? "Claimable" : "Processing";
       out.push({
         pubkey: c.pubkey,
         owner: c.owner,
@@ -98,7 +125,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
     }
     for (const c of live.noTradeWindow) {
       seenPubkeys.add(c.pubkey);
-      const status: CommitmentStatus = now >= c.expiresAt ? "Unlockable" : "Active";
+      const status: CommitmentStatus = now >= c.expiresAt ? "Claimable" : "Processing";
       out.push({
         pubkey: c.pubkey,
         owner: c.owner,
@@ -116,7 +143,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
     if (live.agentGuardian) {
       const c = live.agentGuardian;
       seenPubkeys.add(c.pubkey);
-      const status: CommitmentStatus = now >= c.expiresAt ? "Unlockable" : "Active";
+      const status: CommitmentStatus = now >= c.expiresAt ? "Claimable" : "Processing";
       out.push({
         pubkey: c.pubkey,
         owner: c.owner,
@@ -133,22 +160,32 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
 
     // 2. Terminal rows: cached commitments not in `seenPubkeys`,
     // matched against termination events for status.
+    // Chain events (authoritative) take priority; local optimistic cache is fallback.
     const termByPubkey = new Map<string, NonNullable<typeof terminations>[number]>();
     for (const t of terminations ?? []) {
       // For idempotency keep the first match (most recent first from getSignaturesForAddress)
       if (!termByPubkey.has(t.commitment)) termByPubkey.set(t.commitment, t);
     }
+    const localTermByPubkey = new Map<string, { kind: "Claimed" | "Cancelled" | "Slashed"; signature: string }>();
+    if (owner) {
+      for (const t of loadLocalTerminations(owner)) {
+        if (!localTermByPubkey.has(t.pubkey)) localTermByPubkey.set(t.pubkey, t);
+      }
+    }
 
     for (const c of cached) {
       if (seenPubkeys.has(c.pubkey)) continue; // still active on chain
       const term = termByPubkey.get(c.pubkey);
+      const localTerm = localTermByPubkey.get(c.pubkey);
       const stakeLamports = BigInt(c.stakeLamports);
       const expiresAt = BigInt(c.createdAt) + BigInt(c.durationDays) * 86400n;
+      // Priority: chain event > local optimistic > "Active" (account gone but not indexed yet)
+      const status: CommitmentStatus = term ? term.kind : localTerm ? localTerm.kind : "Active";
       out.push({
         pubkey: c.pubkey,
         owner: c.owner,
         type: c.type,
-        status: term ? term.kind : "Active", // if account is gone but no event found yet, treat as still active until next refresh
+        status,
         stakeLamports,
         createdAt: BigInt(c.createdAt),
         expiresAt,
@@ -157,7 +194,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
         windowStartHour: c.windowStartHour,
         windowEndHour: c.windowEndHour,
         guardianPubkey: c.guardianPubkey,
-        terminationSig: term?.signature,
+        terminationSig: term?.signature ?? localTerm?.signature,
         terminationBlockTime: term?.blockTime ?? null,
         yieldPaid: term?.yieldPaid,
       });
@@ -165,8 +202,8 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
 
     // Sort: active first, then by createdAt desc within each group
     return out.sort((a, b) => {
-      const aActive = a.status === "Active" || a.status === "Unlockable" ? 0 : 1;
-      const bActive = b.status === "Active" || b.status === "Unlockable" ? 0 : 1;
+      const aActive = a.status === "Processing" || a.status === "Claimable" ? 0 : 1;
+      const bActive = b.status === "Processing" || b.status === "Claimable" ? 0 : 1;
       if (aActive !== bActive) return aActive - bActive;
       return Number(b.createdAt - a.createdAt);
     });
