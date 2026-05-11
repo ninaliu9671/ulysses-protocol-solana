@@ -43,42 +43,44 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
   const url = getClusterUrl(cluster);
   const live = useUserCommitments(owner);
 
-  // Watcher API events (cross-device, persistent)
+  // Watcher API is source of truth; chain scan only runs when watcher fails.
+  // A successful empty response from watcher must NOT fall back to chain,
+  // otherwise EVENT_CUTOFF_TS would be defeated.
   const watcherUrl = process.env.NEXT_PUBLIC_WATCHER_URL || "http://localhost:3001";
-  const { data: watcherEvents, mutate: mutateWatcher } = useSWR(
+  type WatcherEvent = {
+    kind: TerminationKind;
+    signature: string;
+    blockTime: number;
+    commitment: string;
+    owner: string;
+    principal: string;
+    typeName: string | null;
+    targetMint: string | null;
+    createdAt: number | null;
+    expiresAt: number | null;
+    yieldPaid: string | null;
+  };
+  const { data: watcherEvents, error: watcherError, mutate: mutateWatcher } = useSWR(
     owner ? ["watcher-events", watcherUrl, owner] : null,
-    async () => {
-      try {
-        const res = await fetch(`${watcherUrl}/events?owner=${owner}&limit=200`);
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json.events as Array<{
-          kind: TerminationKind;
-          signature: string;
-          blockTime: number;
-          commitment: string;
-          owner: string;
-          principal: string;
-          typeName: string | null;
-          targetMint: string | null;
-          createdAt: number | null;
-          expiresAt: number | null;
-          yieldPaid: string | null;
-        }>;
-      } catch {
-        return null;
-      }
+    async (): Promise<WatcherEvent[]> => {
+      const res = await fetch(`${watcherUrl}/events?owner=${owner}&limit=200`);
+      if (!res.ok) throw new Error(`watcher /events ${res.status}`);
+      const json = await res.json();
+      return json.events as WatcherEvent[];
     },
     { refreshInterval: 60_000, dedupingInterval: 30_000 },
   );
 
-  // Termination events for the owner — only refresh occasionally; chain RPC
-  // is rate-limited and these are read-mostly.
-  const { data: terminations, mutate: mutateTerm, isLoading: termLoading } = useSWR(
-    owner ? ["my-terminations", url, owner] : null,
+  // Chain scan: only when watcher is unreachable.
+  const { data: chainTerminations, mutate: mutateTerm, isLoading: termLoading } = useSWR(
+    owner && watcherError ? ["my-terminations", url, owner] : null,
     () => fetchTerminationEventsForOwner(url, owner!, 200),
     { refreshInterval: 60_000, dedupingInterval: 30_000 },
   );
+
+  // Unified termination view used downstream. When watcher responds (even empty),
+  // use it exclusively; chainTerminations only surfaces if watcher errored.
+  const terminations = watcherEvents !== undefined ? null : chainTerminations;
 
   const cached: CachedCommitment[] = useMemo(
     () => (owner ? loadCachedCommitments(owner) : []),

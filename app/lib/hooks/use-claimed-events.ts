@@ -8,61 +8,48 @@ import { fetchClaimedEventsGlobal, type ClaimedEventGlobal } from "../events";
 
 /**
  * All Claimed events globally (for Hall of Masts Earned aggregation).
- * Watcher API is primary (full history, honors EVENT_CUTOFF_TS); chain scan is fallback.
- * Merged by signature with watcher taking priority.
+ * Watcher API is the source of truth; chain scan only runs when watcher fails.
+ * A successful watcher response (even empty []) shortcircuits — this is what lets
+ * EVENT_CUTOFF_TS actually hide old data instead of having chain scan reintroduce it.
  */
 export function useClaimedEvents(): ClaimedEventGlobal[] | undefined {
   const { cluster } = useCluster();
   const url = getClusterUrl(cluster);
-
   const watcherUrl = process.env.NEXT_PUBLIC_WATCHER_URL || "http://localhost:3001";
-  const { data: watcherClaimed } = useSWR(
+
+  // Watcher fetch: throws on failure so SWR sets `error`, which lets us distinguish
+  // "empty success" from "not yet loaded" from "failed".
+  const { data: watcherClaimed, error: watcherError } = useSWR(
     ["watcher-claimed"],
-    async () => {
-      try {
-        const res = await fetch(`${watcherUrl}/claimed?limit=500`);
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json.events as Array<{
-          signature: string;
-          owner: string;
-          principal: string;
-          yieldPaid: string | null;
-        }>;
-      } catch {
-        return null;
-      }
+    async (): Promise<ClaimedEventGlobal[]> => {
+      const res = await fetch(`${watcherUrl}/claimed?limit=500`);
+      if (!res.ok) throw new Error(`watcher /claimed ${res.status}`);
+      const json = await res.json();
+      const events = json.events as Array<{
+        signature: string;
+        owner: string;
+        principal: string;
+        yieldPaid: string | null;
+      }>;
+      return events.map((w) => ({
+        signature: w.signature,
+        owner: w.owner,
+        principal: BigInt(w.principal),
+        yieldPaid: w.yieldPaid ? BigInt(w.yieldPaid) : 0n,
+      }));
     },
     { refreshInterval: 120_000, dedupingInterval: 60_000 },
   );
 
+  // Chain fallback: only fires when watcher errored out.
   const { data: chainClaimed } = useSWR(
-    ["claimed-events-global", url],
+    watcherError ? ["claimed-events-global", url] : null,
     () => fetchClaimedEventsGlobal(url, 100),
     { refreshInterval: 120_000, dedupingInterval: 60_000 },
   );
 
   return useMemo<ClaimedEventGlobal[] | undefined>(() => {
-    const merged = new Map<string, ClaimedEventGlobal>();
-
-    if (watcherClaimed) {
-      for (const w of watcherClaimed) {
-        merged.set(w.signature, {
-          signature: w.signature,
-          owner: w.owner,
-          principal: BigInt(w.principal),
-          yieldPaid: w.yieldPaid ? BigInt(w.yieldPaid) : 0n,
-        });
-      }
-    }
-
-    if (chainClaimed) {
-      for (const c of chainClaimed) {
-        if (!merged.has(c.signature)) merged.set(c.signature, c);
-      }
-    }
-
-    if (merged.size === 0 && !watcherClaimed && !chainClaimed) return undefined;
-    return Array.from(merged.values());
+    if (watcherClaimed !== undefined) return watcherClaimed;
+    return chainClaimed;
   }, [watcherClaimed, chainClaimed]);
 }
