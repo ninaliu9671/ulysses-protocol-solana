@@ -179,8 +179,8 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
       const localTerm = localTermByPubkey.get(c.pubkey);
       const stakeLamports = BigInt(c.stakeLamports);
       const expiresAt = BigInt(c.createdAt) + BigInt(c.durationDays) * 86400n;
-      // Priority: chain event > local optimistic > "Active" (account gone but not indexed yet)
-      const status: CommitmentStatus = term ? term.kind : localTerm ? localTerm.kind : "Active";
+      // Priority: chain event > local optimistic > "Processing" (account gone but not indexed yet)
+      const status: CommitmentStatus = term ? term.kind : localTerm ? localTerm.kind : "Processing";
       out.push({
         pubkey: c.pubkey,
         owner: c.owner,
@@ -197,6 +197,31 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
         terminationSig: term?.signature ?? localTerm?.signature,
         terminationBlockTime: term?.blockTime ?? null,
         yieldPaid: term?.yieldPaid,
+      });
+    }
+
+    // 3. Event-only rows: termination events with no cached metadata
+    // Requires post-upgrade events (createdAt/expiresAt non-null).
+    for (const t of terminations ?? []) {
+      if (seenPubkeys.has(t.commitment)) continue; // still live
+      if (cached.find((c) => c.pubkey === t.commitment)) continue; // handled above
+      if (t.createdAt == null || t.expiresAt == null) continue; // old event, skip
+      seenPubkeys.add(t.commitment); // prevent duplicates if multiple events for same commitment
+      const stakeLamports = t.principal;
+      const expiresAt = BigInt(t.expiresAt);
+      const createdAt = BigInt(t.createdAt);
+      out.push({
+        pubkey: t.commitment,
+        owner: t.owner,
+        type: t.commitmentType === "Unknown" ? "NoSell" : t.commitmentType,
+        status: t.kind,
+        stakeLamports,
+        createdAt,
+        expiresAt,
+        targetMint: t.targetMint ?? undefined,
+        terminationSig: t.signature,
+        terminationBlockTime: t.blockTime,
+        yieldPaid: t.yieldPaid,
       });
     }
 
