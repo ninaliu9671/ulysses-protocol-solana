@@ -139,7 +139,7 @@ function StatsBar() {
   const { stats: protocolStats } = useProtocolStats();
 
   const fmt = (l: bigint | undefined): string =>
-    l === undefined ? "—" : lamportsToDisplaySol(l, 2) + " SOL";
+    l === undefined ? "0.00 SOL" : lamportsToDisplaySol(l, 2) + " SOL";
 
   const totalSlashed = protocolStats
     ? BigInt(protocolStats.total_slashed_lamports)
