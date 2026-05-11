@@ -18,12 +18,13 @@ import {
   ComputeBudgetProgram,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import bs58 from "bs58";
 
 // ─── Config ───────────────────────────────────────────────────────────────
 
 const PROGRAM_ID = new PublicKey("3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S");
 const TREASURY = new PublicKey("9CYhSzFPXUQRmKncPtBFuPdRMZwumsexcDUVGaULcQo6");
-const RPC = "https://api.devnet.solana.com";
+const RPC = process.env.HELIUS_RPC_URL || "https://devnet.helius-rpc.com/?api-key=45864446-65de-4522-a262-c4dccf7babe0";
 
 const SCRIPT_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const SEED_KEYS_PATH = path.join(SCRIPT_DIR, "seed-keys.json");
@@ -32,10 +33,10 @@ const SLASHER_KEYPAIR_PATH = path.join(SCRIPT_DIR, "..", "watcher", "slasher-key
 // ─── Discriminators (from IDL) ────────────────────────────────────────────
 
 const ACCOUNT_DISC = {
-  NoSellCommitment: Buffer.from([210, 225, 13, 205, 235, 122, 238, 19]),
-  HoldAboveCommitment: Buffer.from([134, 251, 75, 38, 68, 73, 197, 11]),
-  NoTradeWindowCommitment: Buffer.from([175, 106, 90, 191, 234, 29, 246, 172]),
-  AgentGuardianCommitment: Buffer.from([99, 27, 73, 222, 92, 136, 198, 162]),
+  NoSellCommitment: Buffer.from([47, 79, 167, 232, 31, 32, 103, 159]),
+  HoldAboveCommitment: Buffer.from([136, 52, 202, 39, 186, 119, 46, 155]),
+  NoTradeWindowCommitment: Buffer.from([104, 240, 27, 63, 223, 2, 186, 99]),
+  AgentGuardianCommitment: Buffer.from([222, 194, 193, 96, 53, 240, 191, 6]),
 };
 
 const CANCEL_DISC = {
@@ -207,7 +208,7 @@ async function main() {
   for (const type of types) {
     console.log(`\n[RESET] Fetching ${type.name} accounts...`);
     const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
-      filters: [{ memcmp: { offset: 0, bytes: type.disc.toString("base64") } }],
+      filters: [{ memcmp: { offset: 0, bytes: bs58.encode(type.disc) } }],
     });
     console.log(`[RESET] Found ${accounts.length} ${type.name} accounts`);
 

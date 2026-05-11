@@ -55,8 +55,10 @@ function recordSlashAttempt(pubkey, type, owner, txSig, success, errorMessage) {
 }
 
 function getRecentSlashes(limit = 50) {
+  const cutoffMs = parseInt(process.env.EVENT_CUTOFF_TS || '0', 10) * 1000;
   const entries = Object.entries(state.slash_attempts)
     .filter(([, v]) => v.success)
+    .filter(([, v]) => cutoffMs === 0 || (v.attempted_at || 0) >= cutoffMs)
     .map(([pubkey, v]) => ({ commitment_pubkey: pubkey, ...v }))
     .sort((a, b) => b.attempted_at - a.attempted_at)
     .slice(0, limit);
@@ -95,6 +97,23 @@ function addRedistributed(eventKey, lamports) {
 }
 
 function getTotals() {
+  // When EVENT_CUTOFF_TS is set, recompute totals from filtered events array
+  // (lifetime totals can't be filtered, so derive from per-event data).
+  if (EVENT_CUTOFF_TS > 0) {
+    let slashed = 0n;
+    let redistributed = 0n;
+    for (const e of state.events) {
+      if ((e.blockTime || 0) < EVENT_CUTOFF_TS) continue;
+      if (e.kind === 'Slashed') slashed += BigInt(e.principal || '0');
+      else if (e.kind === 'Claimed' && e.yieldPaid) redistributed += BigInt(e.yieldPaid);
+    }
+    return {
+      total_slashed_lamports: slashed.toString(),
+      total_redistributed_lamports: redistributed.toString(),
+      history_backfill_done: state.totals.history_backfill_done,
+      last_scan_completed: state.totals.last_scan_completed,
+    };
+  }
   return {
     total_slashed_lamports: state.totals.total_slashed_lamports,
     total_redistributed_lamports: state.totals.total_redistributed_lamports,
@@ -193,10 +212,15 @@ function addTerminatedEvent(event, signature, blockTime) {
  * @param {number} limit - Max events to return
  * @returns {Array} Events in blockTime DESC order
  */
+const EVENT_CUTOFF_TS = parseInt(process.env.EVENT_CUTOFF_TS || '0', 10);
+
 function getTerminatedEvents(owner = null, limit = 200) {
   let filtered = state.events;
+  if (EVENT_CUTOFF_TS > 0) {
+    filtered = filtered.filter(e => (e.blockTime || 0) >= EVENT_CUTOFF_TS);
+  }
   if (owner) {
-    filtered = state.events.filter(e => e.owner === owner);
+    filtered = filtered.filter(e => e.owner === owner);
   }
   return filtered.slice(0, limit);
 }
@@ -209,6 +233,19 @@ function getTerminatedEvents(owner = null, limit = 200) {
 function getGraveyardEvents(limit = 50) {
   return state.events
     .filter(e => e.kind === 'Slashed' || e.kind === 'Cancelled')
+    .filter(e => EVENT_CUTOFF_TS === 0 || (e.blockTime || 0) >= EVENT_CUTOFF_TS)
+    .slice(0, limit);
+}
+
+/**
+ * Get Claimed events (for Hall of Masts Earned column).
+ * @param {number} limit - Max events to return
+ * @returns {Array} Events in blockTime DESC order
+ */
+function getClaimedEvents(limit = 500) {
+  return state.events
+    .filter(e => e.kind === 'Claimed')
+    .filter(e => EVENT_CUTOFF_TS === 0 || (e.blockTime || 0) >= EVENT_CUTOFF_TS)
     .slice(0, limit);
 }
 
@@ -231,4 +268,5 @@ module.exports = {
   addTerminatedEvent,
   getTerminatedEvents,
   getGraveyardEvents,
+  getClaimedEvents,
 };

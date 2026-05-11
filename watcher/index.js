@@ -194,6 +194,17 @@ app.get('/events', (req, res) => {
   }
 });
 
+// Hall of Masts — all Claimed events (for per-owner earned yield aggregation)
+app.get('/claimed', (req, res) => {
+  const limit = parseInt(req.query.limit || '500', 10);
+  try {
+    const events = db.getClaimedEvents(limit);
+    res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Siren Graveyard — recent Slashed + Cancelled events
 app.get('/graveyard', (req, res) => {
   const limit = parseInt(req.query.limit || '50', 10);

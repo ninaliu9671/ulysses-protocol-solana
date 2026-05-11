@@ -89,8 +89,12 @@ function parseEventBytes(b64) {
   };
 }
 
+const EVENT_CUTOFF_TS = parseInt(process.env.EVENT_CUTOFF_TS || '0', 10);
+
 async function processTx(db, signature, blockTime, logs) {
   if (!Array.isArray(logs)) return;
+  // Skip events before cutoff timestamp (used for demo resets)
+  if (EVENT_CUTOFF_TS > 0 && blockTime > 0 && blockTime < EVENT_CUTOFF_TS) return;
   for (let i = 0; i < logs.length; i++) {
     const m = logs[i].match(/^Program data: (.+)$/);
     if (!m) continue;
