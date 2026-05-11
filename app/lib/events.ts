@@ -119,7 +119,7 @@ export async function fetchSlashedEvents(
   const [slashedDisc, cancelledDisc] = await Promise.all([getSlashedDisc(), getCancelledDisc()]);
   const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
     VAULT_PROGRAM_ADDRESS,
-    { limit: 100 },
+    { limit: 500 },
   ]);
   if (!sigs?.length) return [];
 
@@ -299,7 +299,7 @@ export async function fetchClaimedEventsGlobal(rpcUrl: string, limit = 100): Pro
   const claimedDisc = await getClaimedDisc();
   const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
     VAULT_PROGRAM_ADDRESS,
-    { limit: 100 },
+    { limit: 500 },
   ]);
   if (!sigs?.length) return [];
 

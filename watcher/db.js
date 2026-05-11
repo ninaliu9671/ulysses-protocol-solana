@@ -7,7 +7,7 @@ const path = require('path');
 
 const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, 'watcher-state.json');
 
-let state = { slash_attempts: {}, last_sig_seen: {}, totals: null };
+let state = { slash_attempts: {}, last_sig_seen: {}, totals: null, events: [] };
 
 function defaultTotals() {
   return {
@@ -27,8 +27,9 @@ function init() {
     if (!state.last_sig_seen) state.last_sig_seen = {};
     if (!state.totals) state.totals = defaultTotals();
     if (!state.totals.seen_event_keys) state.totals.seen_event_keys = {};
+    if (!state.events) state.events = [];
   } catch (_) {
-    state = { slash_attempts: {}, last_sig_seen: {}, totals: defaultTotals() };
+    state = { slash_attempts: {}, last_sig_seen: {}, totals: defaultTotals(), events: [] };
     flush();
   }
 }
@@ -122,6 +123,95 @@ function persistTotals() {
   flush();
 }
 
+// ---- Event Persistence (Terminated events: Slashed / Cancelled / Claimed) ----
+// Store full event details for cross-device My Commitments history and Siren Graveyard.
+// Cap at 10,000 events to prevent unbounded growth.
+const MAX_EVENTS = 10000;
+
+/**
+ * Add a terminated event (Slashed / Cancelled / Claimed).
+ * Deduplicates by eventKey = `${kind}:${signature}`.
+ * Events are stored in blockTime DESC order (newest first).
+ *
+ * @param {Object} event - Event details
+ * @param {string} event.kind - "Slashed" | "Cancelled" | "Claimed"
+ * @param {string} event.commitment - Commitment pubkey (base58)
+ * @param {string} event.owner - Owner pubkey (base58)
+ * @param {bigint} event.principal - Principal amount in lamports
+ * @param {string} [event.typeName] - Commitment type ("NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian")
+ * @param {string} [event.targetMint] - Target mint pubkey (base58) or null
+ * @param {number} [event.createdAt] - Unix timestamp (seconds)
+ * @param {number} [event.expiresAt] - Unix timestamp (seconds)
+ * @param {bigint} [event.yieldPaid] - Yield paid (Claimed only)
+ * @param {string} signature - Transaction signature
+ * @param {number} blockTime - Block timestamp (seconds)
+ */
+function addTerminatedEvent(event, signature, blockTime) {
+  const eventKey = `${event.kind}:${signature}`;
+
+  // Dedup check
+  if (state.events.some(e => e.eventKey === eventKey)) return;
+
+  const record = {
+    eventKey,
+    kind: event.kind,
+    signature,
+    blockTime,
+    commitment: event.commitment,
+    owner: event.owner,
+    principal: event.principal.toString(),
+    typeName: event.typeName ?? null,
+    targetMint: event.targetMint ?? null,
+    createdAt: event.createdAt ?? null,
+    expiresAt: event.expiresAt ?? null,
+    yieldPaid: event.yieldPaid ? event.yieldPaid.toString() : null,
+  };
+
+  // Insert in blockTime DESC order (binary search for insertion point)
+  let insertIdx = 0;
+  for (let i = 0; i < state.events.length; i++) {
+    if (state.events[i].blockTime < blockTime) {
+      insertIdx = i;
+      break;
+    }
+    insertIdx = i + 1;
+  }
+
+  state.events.splice(insertIdx, 0, record);
+
+  // Cap at MAX_EVENTS (remove oldest)
+  if (state.events.length > MAX_EVENTS) {
+    state.events = state.events.slice(0, MAX_EVENTS);
+  }
+
+  flush();
+}
+
+/**
+ * Get terminated events, optionally filtered by owner.
+ * @param {string|null} owner - Owner pubkey to filter by, or null for all
+ * @param {number} limit - Max events to return
+ * @returns {Array} Events in blockTime DESC order
+ */
+function getTerminatedEvents(owner = null, limit = 200) {
+  let filtered = state.events;
+  if (owner) {
+    filtered = state.events.filter(e => e.owner === owner);
+  }
+  return filtered.slice(0, limit);
+}
+
+/**
+ * Get Graveyard events (Slashed + Cancelled only).
+ * @param {number} limit - Max events to return
+ * @returns {Array} Events in blockTime DESC order
+ */
+function getGraveyardEvents(limit = 50) {
+  return state.events
+    .filter(e => e.kind === 'Slashed' || e.kind === 'Cancelled')
+    .slice(0, limit);
+}
+
 module.exports = {
   init,
   wasAlreadySlashed,
@@ -138,4 +228,7 @@ module.exports = {
   markBackfillDone,
   markScanCompleted,
   persistTotals,
+  addTerminatedEvent,
+  getTerminatedEvents,
+  getGraveyardEvents,
 };

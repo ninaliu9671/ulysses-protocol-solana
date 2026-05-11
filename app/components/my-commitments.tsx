@@ -23,6 +23,7 @@ import {
 } from "../generated/vault";
 import { TYPE_BY_KEY } from "../lib/commitment-types";
 import { saveLocalTermination } from "../lib/my-commitments-cache";
+import { lamportsToDisplaySol } from "../lib/lamports";
 
 const PRECISION = 1_000_000_000n;
 
@@ -154,21 +155,21 @@ export function MyCommitmentsSection() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs mb-2 flex-wrap gap-y-1" style={{ color: "var(--muted)" }}>
-                  <span>Stake: <span style={{ color: "var(--foreground)" }}>{(Number(row.stakeLamports) / 1e9).toFixed(4)} SOL</span></span>
+                  <span>Stake: <span style={{ color: "var(--foreground)" }}>{lamportsToDisplaySol(row.stakeLamports, 2)} SOL</span></span>
                   {!isTerminal && (
                     <>
                       <span>Progress: <span style={{ color: progress > 100 ? "#fcd34d" : "var(--foreground)" }}>{progress.toFixed(1)}%</span></span>
-                      <span>Yield: <span style={{ color: "var(--gold)" }}>+{(Number(yieldL) / 1e9).toFixed(6)} SOL</span></span>
+                      <span>Yield: <span style={{ color: "var(--gold)" }}>+{lamportsToDisplaySol(yieldL, 2)} SOL</span></span>
                     </>
                   )}
                   {row.status === "Slashed" && (
-                    <span style={{ color: "#fca5a5" }}>Loss: −{(Number(row.stakeLamports) / 1e9).toFixed(4)} SOL → reward pool</span>
+                    <span style={{ color: "#fca5a5" }}>Loss: −{lamportsToDisplaySol(row.stakeLamports, 2)} SOL → reward pool</span>
                   )}
                   {row.status === "Cancelled" && (
-                    <span style={{ color: "#fca5a5" }}>Loss: −{(Number(row.stakeLamports) / 1e9).toFixed(4)} SOL → reward pool</span>
+                    <span style={{ color: "#fca5a5" }}>Loss: −{lamportsToDisplaySol(row.stakeLamports, 2)} SOL → reward pool</span>
                   )}
                   {row.status === "Claimed" && row.yieldPaid !== undefined && (
-                    <span style={{ color: "#86efac" }}>Earned: +{(Number(row.yieldPaid) / 1e9).toFixed(6)} SOL</span>
+                    <span style={{ color: "#86efac" }}>Earned: +{lamportsToDisplaySol(row.yieldPaid, 2)} SOL</span>
                   )}
                 </div>
                 {!isTerminal && (

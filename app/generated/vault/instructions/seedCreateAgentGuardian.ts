@@ -18,8 +18,6 @@ import {
   getI64Encoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   transformEncoder,
@@ -97,14 +95,14 @@ export type SeedCreateAgentGuardianInstruction<
 export type SeedCreateAgentGuardianInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   guardianPubkey: Address;
   commitTimestamp: bigint;
 };
 
 export type SeedCreateAgentGuardianInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   guardianPubkey: Address;
   commitTimestamp: number | bigint;
 };
@@ -114,7 +112,7 @@ export function getSeedCreateAgentGuardianInstructionDataEncoder(): FixedSizeEnc
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["guardianPubkey", getAddressEncoder()],
       ["commitTimestamp", getI64Encoder()],
     ]),
@@ -129,7 +127,7 @@ export function getSeedCreateAgentGuardianInstructionDataDecoder(): FixedSizeDec
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["guardianPubkey", getAddressDecoder()],
     ["commitTimestamp", getI64Decoder()],
   ]);
@@ -160,7 +158,7 @@ export type SeedCreateAgentGuardianAsyncInput<
   rewardPool?: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateAgentGuardianInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateAgentGuardianInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateAgentGuardianInstructionDataArgs["durationSeconds"];
   guardianPubkey: SeedCreateAgentGuardianInstructionDataArgs["guardianPubkey"];
   commitTimestamp: SeedCreateAgentGuardianInstructionDataArgs["commitTimestamp"];
 };
@@ -277,7 +275,7 @@ export type SeedCreateAgentGuardianInput<
   rewardPool: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateAgentGuardianInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateAgentGuardianInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateAgentGuardianInstructionDataArgs["durationSeconds"];
   guardianPubkey: SeedCreateAgentGuardianInstructionDataArgs["guardianPubkey"];
   commitTimestamp: SeedCreateAgentGuardianInstructionDataArgs["commitTimestamp"];
 };

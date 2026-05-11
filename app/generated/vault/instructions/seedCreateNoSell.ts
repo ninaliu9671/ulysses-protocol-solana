@@ -16,8 +16,6 @@ import {
   getI64Encoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   transformEncoder,
@@ -99,14 +97,14 @@ export type SeedCreateNoSellInstruction<
 export type SeedCreateNoSellInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   floorAmount: bigint;
   commitTimestamp: bigint;
 };
 
 export type SeedCreateNoSellInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   floorAmount: number | bigint;
   commitTimestamp: number | bigint;
 };
@@ -116,7 +114,7 @@ export function getSeedCreateNoSellInstructionDataEncoder(): FixedSizeEncoder<Se
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["floorAmount", getU64Encoder()],
       ["commitTimestamp", getI64Encoder()],
     ]),
@@ -128,7 +126,7 @@ export function getSeedCreateNoSellInstructionDataDecoder(): FixedSizeDecoder<Se
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["floorAmount", getU64Decoder()],
     ["commitTimestamp", getI64Decoder()],
   ]);
@@ -161,7 +159,7 @@ export type SeedCreateNoSellAsyncInput<
   rewardPool?: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateNoSellInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateNoSellInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateNoSellInstructionDataArgs["durationSeconds"];
   floorAmount: SeedCreateNoSellInstructionDataArgs["floorAmount"];
   commitTimestamp: SeedCreateNoSellInstructionDataArgs["commitTimestamp"];
 };
@@ -287,7 +285,7 @@ export type SeedCreateNoSellInput<
   rewardPool: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateNoSellInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateNoSellInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateNoSellInstructionDataArgs["durationSeconds"];
   floorAmount: SeedCreateNoSellInstructionDataArgs["floorAmount"];
   commitTimestamp: SeedCreateNoSellInstructionDataArgs["commitTimestamp"];
 };

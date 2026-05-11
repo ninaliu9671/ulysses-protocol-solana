@@ -22,9 +22,9 @@ pub mod vault {
     pub fn create_no_sell<'info>(
         ctx: Context<'_, '_, 'info, 'info, CreateNoSell<'info>>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
     ) -> Result<()> {
-        instructions::create_no_sell::handler(ctx, stake_amount, duration_days)
+        instructions::create_no_sell::handler(ctx, stake_amount, duration_seconds)
     }
 
     pub fn claim_no_sell(ctx: Context<ClaimNoSell>) -> Result<()> {
@@ -45,10 +45,10 @@ pub mod vault {
     pub fn create_hold_above<'info>(
         ctx: Context<'_, '_, 'info, 'info, CreateHoldAbove<'info>>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         floor_amount: u64,
     ) -> Result<()> {
-        instructions::create_hold_above::handler(ctx, stake_amount, duration_days, floor_amount)
+        instructions::create_hold_above::handler(ctx, stake_amount, duration_seconds, floor_amount)
     }
 
     pub fn claim_hold_above(ctx: Context<ClaimHoldAbove>) -> Result<()> {
@@ -69,7 +69,7 @@ pub mod vault {
     pub fn create_no_trade_window(
         ctx: Context<CreateNoTradeWindow>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         window_start_hour: u8,
         window_end_hour: u8,
         nonce: u64,
@@ -77,7 +77,7 @@ pub mod vault {
         instructions::create_no_trade_window::handler(
             ctx,
             stake_amount,
-            duration_days,
+            duration_seconds,
             window_start_hour,
             window_end_hour,
             nonce,
@@ -100,13 +100,13 @@ pub mod vault {
     pub fn create_agent_guardian<'info>(
         ctx: Context<'_, '_, 'info, 'info, CreateAgentGuardian<'info>>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         guardian_pubkey: Pubkey,
     ) -> Result<()> {
         instructions::create_agent_guardian::handler(
             ctx,
             stake_amount,
-            duration_days,
+            duration_seconds,
             guardian_pubkey,
         )
     }
@@ -128,14 +128,14 @@ pub mod vault {
     pub fn seed_create_no_sell(
         ctx: Context<SeedCreateNoSell>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         floor_amount: u64,
         commit_timestamp: i64,
     ) -> Result<()> {
         instructions::seeded::seed_create_no_sell(
             ctx,
             stake_amount,
-            duration_days,
+            duration_seconds,
             floor_amount,
             commit_timestamp,
         )
@@ -145,14 +145,14 @@ pub mod vault {
     pub fn seed_create_hold_above(
         ctx: Context<SeedCreateHoldAbove>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         floor_amount: u64,
         commit_timestamp: i64,
     ) -> Result<()> {
         instructions::seeded::seed_create_hold_above(
             ctx,
             stake_amount,
-            duration_days,
+            duration_seconds,
             floor_amount,
             commit_timestamp,
         )
@@ -162,7 +162,7 @@ pub mod vault {
     pub fn seed_create_no_trade_window(
         ctx: Context<SeedCreateNoTradeWindow>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         window_start_hour: u8,
         window_end_hour: u8,
         nonce: u64,
@@ -171,7 +171,7 @@ pub mod vault {
         instructions::seeded::seed_create_no_trade_window(
             ctx,
             stake_amount,
-            duration_days,
+            duration_seconds,
             window_start_hour,
             window_end_hour,
             nonce,
@@ -183,14 +183,14 @@ pub mod vault {
     pub fn seed_create_agent_guardian(
         ctx: Context<SeedCreateAgentGuardian>,
         stake_amount: u64,
-        duration_days: u16,
+        duration_seconds: u64,
         guardian_pubkey: Pubkey,
         commit_timestamp: i64,
     ) -> Result<()> {
         instructions::seeded::seed_create_agent_guardian(
             ctx,
             stake_amount,
-            duration_days,
+            duration_seconds,
             guardian_pubkey,
             commit_timestamp,
         )

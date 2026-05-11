@@ -3,7 +3,7 @@
 export function SiteFooter() {
   return (
     <footer className="py-6" style={{ borderTop: "1px solid var(--border-low)" }}>
-      <div className="max-w-7xl mx-auto px-8 flex flex-wrap items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto px-8 flex flex-wrap items-center justify-between gap-4 relative">
         <div className="flex items-center gap-3">
           <div
             className="flex items-center justify-center w-7 h-7 rounded-full"
@@ -21,6 +21,9 @@ export function SiteFooter() {
             <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--gold)" }}>ULYSSES</div>
             <div style={{ fontSize: 8, letterSpacing: "0.15em", color: "var(--muted)" }}>PROTOCOL</div>
           </div>
+        </div>
+        <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ fontSize: 11, color: "var(--muted)" }}>
+          <span>Demo mode · All SOL amounts are ×10,000 the on-chain value. Inputs scale down automatically.</span>
         </div>
         <div className="flex items-center gap-4" style={{ fontSize: 11, color: "var(--muted)" }}>
           <span>Built on Solana · Devnet · v2.1</span>

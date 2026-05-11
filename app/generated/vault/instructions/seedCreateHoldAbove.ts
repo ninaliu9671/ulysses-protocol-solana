@@ -16,8 +16,6 @@ import {
   getI64Encoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   transformEncoder,
@@ -103,14 +101,14 @@ export type SeedCreateHoldAboveInstruction<
 export type SeedCreateHoldAboveInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   floorAmount: bigint;
   commitTimestamp: bigint;
 };
 
 export type SeedCreateHoldAboveInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   floorAmount: number | bigint;
   commitTimestamp: number | bigint;
 };
@@ -120,7 +118,7 @@ export function getSeedCreateHoldAboveInstructionDataEncoder(): FixedSizeEncoder
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["floorAmount", getU64Encoder()],
       ["commitTimestamp", getI64Encoder()],
     ]),
@@ -135,7 +133,7 @@ export function getSeedCreateHoldAboveInstructionDataDecoder(): FixedSizeDecoder
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["floorAmount", getU64Decoder()],
     ["commitTimestamp", getI64Decoder()],
   ]);
@@ -168,7 +166,7 @@ export type SeedCreateHoldAboveAsyncInput<
   rewardPool?: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateHoldAboveInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateHoldAboveInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateHoldAboveInstructionDataArgs["durationSeconds"];
   floorAmount: SeedCreateHoldAboveInstructionDataArgs["floorAmount"];
   commitTimestamp: SeedCreateHoldAboveInstructionDataArgs["commitTimestamp"];
 };
@@ -294,7 +292,7 @@ export type SeedCreateHoldAboveInput<
   rewardPool: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateHoldAboveInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateHoldAboveInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateHoldAboveInstructionDataArgs["durationSeconds"];
   floorAmount: SeedCreateHoldAboveInstructionDataArgs["floorAmount"];
   commitTimestamp: SeedCreateHoldAboveInstructionDataArgs["commitTimestamp"];
 };

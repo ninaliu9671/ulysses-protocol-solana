@@ -3,6 +3,7 @@
 import { useSlashedEvents } from "../lib/hooks/use-slashed-events";
 import { TYPE_BY_KEY } from "../lib/commitment-types";
 import type { SlashedEvent } from "../lib/events";
+import { lamportsToDisplaySol } from "../lib/lamports";
 
 function shortAddr(a: string): string {
   return a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "—";
@@ -47,9 +48,9 @@ export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
           <div className="grid grid-cols-12 gap-2 text-[10px] font-bold pb-2" style={{ color: "var(--muted)", letterSpacing: "0.1em", borderBottom: "1px solid var(--border)" }}>
             <div className="col-span-2">TIME</div>
             <div className="col-span-2">USER</div>
+            <div className="col-span-2">TYPE</div>
             <div className="col-span-2">STATUS</div>
-            <div className="col-span-3">TYPE</div>
-            <div className="col-span-1 text-center">PROGRESS</div>
+            <div className="col-span-2 text-center">PROGRESS</div>
             <div className="col-span-2 text-right">LOSS (SOL)</div>
           </div>
           <div className="overflow-y-auto" style={{ maxHeight: "420px" }}>
@@ -60,12 +61,7 @@ export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
               <div key={e.signature} className="grid grid-cols-12 gap-2 text-xs py-1.5" style={{ color: "var(--foreground)" }}>
                 <div className="col-span-2" style={{ color: "var(--muted)" }}>{relativeTime(e.blockTime)}</div>
                 <div className="col-span-2 font-mono">{shortAddr(e.owner)}</div>
-                <div className="col-span-2">
-                  <span style={{ color: isFailed ? "#fca5a5" : "#9ca3af", fontSize: 10 }}>
-                    {isFailed ? "💀 Failed" : "⚫ Cancelled"}
-                  </span>
-                </div>
-                <div className="col-span-3 flex items-center gap-1.5">
+                <div className="col-span-2 flex items-center gap-1.5">
                   {meta ? (
                     <>
                       <span className="text-sm">{meta.emoji}</span>
@@ -75,8 +71,13 @@ export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
                     <span style={{ color: "var(--muted)" }}>—</span>
                   )}
                 </div>
-                <div className="col-span-1 text-center" style={{ color: "var(--muted)" }}>{progressPct(e)}</div>
-                <div className="col-span-2 text-right" style={{ color: "#fca5a5" }}>−{(Number(e.principal) / 1e9).toFixed(4)}</div>
+                <div className="col-span-2">
+                  <span style={{ color: isFailed ? "#fca5a5" : "#9ca3af", fontSize: 10 }}>
+                    {isFailed ? "💀 Failed" : "⚫ Cancelled"}
+                  </span>
+                </div>
+                <div className="col-span-2 text-center" style={{ color: "var(--muted)" }}>{progressPct(e)}</div>
+                <div className="col-span-2 text-right tabular-nums" style={{ color: "#fca5a5" }}>−{lamportsToDisplaySol(e.principal, 2)}</div>
               </div>
             );
           })}

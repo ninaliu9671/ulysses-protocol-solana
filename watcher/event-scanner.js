@@ -19,12 +19,14 @@
 
 const { sha256 } = require('@noble/hashes/sha2');
 const { PROGRAM_ID } = require('./chain');
+const bs58 = require('bs58');
 
 function eventDisc(name) {
   return Buffer.from(sha256(`event:${name}`)).slice(0, 8);
 }
 const SLASHED_DISC = eventDisc('Slashed');
 const CLAIMED_DISC = eventDisc('Claimed');
+const CANCELLED_DISC = eventDisc('Cancelled');
 
 const SIG_PAGE_LIMIT = 1000; // RPC max
 const TX_BATCH = 5;          // concurrent getTransaction calls
@@ -36,16 +38,58 @@ function parseEventBytes(b64) {
   let kind = null;
   if (disc.equals(SLASHED_DISC)) kind = 'Slashed';
   else if (disc.equals(CLAIMED_DISC)) kind = 'Claimed';
+  else if (disc.equals(CANCELLED_DISC)) kind = 'Cancelled';
   else return null;
+
+  // Common fields for all events
+  const commitment = bytes.slice(8, 40).toString('base64'); // Store as base64 for now
+  const owner = bytes.slice(40, 72).toString('base64');
   const principal = bytes.readBigUInt64LE(72);
-  let yieldPaid = 0n;
-  if (kind === 'Claimed' && bytes.length >= 88) {
-    yieldPaid = bytes.readBigUInt64LE(80);
+
+  let yieldPaid = null;
+  let typeDisc = null;
+  let targetMint = null;
+  let createdAt = null;
+  let expiresAt = null;
+
+  if (kind === 'Claimed') {
+    // Claimed: yield_paid at [80:88], new fields start at [88]
+    if (bytes.length >= 88) {
+      yieldPaid = bytes.readBigUInt64LE(80);
+    }
+    if (bytes.length >= 137) {
+      typeDisc = bytes[88];
+      targetMint = bytes.slice(89, 121).toString('base64');
+      createdAt = bytes.readBigInt64LE(121);
+      expiresAt = bytes.readBigInt64LE(129);
+    }
+  } else {
+    // Slashed / Cancelled: new fields start at [80]
+    if (bytes.length >= 129) {
+      typeDisc = bytes[80];
+      targetMint = bytes.slice(81, 113).toString('base64');
+      createdAt = bytes.readBigInt64LE(113);
+      expiresAt = bytes.readBigInt64LE(121);
+    }
   }
-  return { kind, principal, yieldPaid };
+
+  const typeNames = ['NoSell', 'HoldAbove', 'NoTradeWindow', 'AgentGuardian'];
+  const typeName = typeDisc !== null ? typeNames[typeDisc] : null;
+
+  return {
+    kind,
+    commitment,
+    owner,
+    principal,
+    yieldPaid,
+    typeName,
+    targetMint,
+    createdAt: createdAt !== null ? Number(createdAt) : null,
+    expiresAt: expiresAt !== null ? Number(expiresAt) : null,
+  };
 }
 
-async function processTx(db, signature, logs) {
+async function processTx(db, signature, blockTime, logs) {
   if (!Array.isArray(logs)) return;
   for (let i = 0; i < logs.length; i++) {
     const m = logs[i].match(/^Program data: (.+)$/);
@@ -54,11 +98,36 @@ async function processTx(db, signature, logs) {
     if (!ev) continue;
     const eventKey = `${ev.kind}:${signature}:${i}`;
     if (db.hasSeenEvent(eventKey)) continue;
+
+    // Convert base64 pubkeys to base58
+    const commitmentB58 = bs58.encode(Buffer.from(ev.commitment, 'base64'));
+    const ownerB58 = bs58.encode(Buffer.from(ev.owner, 'base64'));
+    const targetMintB58 = ev.targetMint ? bs58.encode(Buffer.from(ev.targetMint, 'base64')) : null;
+
+    // Update totals (legacy behavior)
     if (ev.kind === 'Slashed') {
       db.addSlashed(eventKey, ev.principal);
     } else if (ev.kind === 'Claimed') {
-      db.addRedistributed(eventKey, ev.yieldPaid);
+      db.addRedistributed(eventKey, ev.yieldPaid || 0n);
     }
+    // Note: Cancelled doesn't affect totals (no redistribution)
+
+    // Persist full event details for cross-device history
+    db.addTerminatedEvent(
+      {
+        kind: ev.kind,
+        commitment: commitmentB58,
+        owner: ownerB58,
+        principal: ev.principal,
+        typeName: ev.typeName,
+        targetMint: targetMintB58,
+        createdAt: ev.createdAt,
+        expiresAt: ev.expiresAt,
+        yieldPaid: ev.yieldPaid,
+      },
+      signature,
+      blockTime,
+    );
   }
 }
 
@@ -82,7 +151,7 @@ async function scanSignatures(connection, db, sigInfos) {
       if (!tx?.meta?.logMessages) continue;
       // Skip failed transactions — emit! only fires on success but be safe.
       if (tx.meta.err) continue;
-      await processTx(db, slice[j].signature, tx.meta.logMessages);
+      await processTx(db, slice[j].signature, tx.blockTime || slice[j].blockTime || 0, tx.meta.logMessages);
     }
   }
 }

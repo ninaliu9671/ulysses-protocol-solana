@@ -56,12 +56,12 @@ pub struct CreateNoSell<'info> {
 pub fn handler<'info>(
     ctx: Context<'_, '_, 'info, 'info, CreateNoSell<'info>>,
     stake_amount: u64,
-    duration_days: u16,
+    duration_seconds: u64,
 ) -> Result<()> {
     require!(stake_amount >= MIN_STAKE_LAMPORTS, ErrorCode::StakeBelowMin);
     require!(stake_amount <= MAX_STAKE_LAMPORTS, ErrorCode::StakeAboveMax);
     require!(
-        duration_days >= MIN_DURATION_DAYS && duration_days <= MAX_DURATION_DAYS,
+        duration_seconds >= MIN_DURATION_SECONDS && duration_seconds <= MAX_DURATION_SECONDS,
         ErrorCode::DurationOutOfRange
     );
 
@@ -101,7 +101,7 @@ pub fn handler<'info>(
     )?;
 
     let weight_u128 = (stake_amount as u128)
-        .checked_mul(duration_days as u128)
+        .checked_mul(duration_seconds as u128)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
     let weight = integer_sqrt_u128(weight_u128);
     require!(weight > 0, ErrorCode::ArithmeticOverflow);
@@ -114,7 +114,7 @@ pub fn handler<'info>(
 
     let now = Clock::get()?.unix_timestamp;
     let expires_at = now
-        .checked_add((duration_days as i64) * SECONDS_PER_DAY)
+        .checked_add(duration_seconds as i64)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
 
     let commitment = &mut ctx.accounts.commitment;

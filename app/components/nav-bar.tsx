@@ -1,12 +1,26 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { WalletButton } from "./wallet-button";
 
 export function NavBar() {
   const pathname = usePathname();
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname?.startsWith(href);
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab") ?? "home";
+
+  const isActive = (href: string, tabKey: string) => {
+    if (href === "/docs") return pathname?.startsWith("/docs");
+    return pathname === "/" && tab === tabKey;
+  };
+
+  const navItems = [
+    { label: "Home",        href: "/",                  tabKey: "home" },
+    { label: "Commitment",  href: "/?tab=commitment",   tabKey: "commitment" },
+    { label: "Leaderboard", href: "/?tab=leaderboard",  tabKey: "leaderboard" },
+    { label: "Docs",        href: "/docs",              tabKey: "docs" },
+  ];
+
   return (
     <header
       className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-4"
@@ -17,7 +31,7 @@ export function NavBar() {
       }}
     >
       {/* Logo */}
-      <a href="/" className="flex items-center gap-3 select-none">
+      <Link href="/" className="flex items-center gap-3 select-none">
         <div
           className="flex items-center justify-center w-9 h-9 rounded-full"
           style={{ border: "1.5px solid var(--gold)" }}
@@ -38,19 +52,14 @@ export function NavBar() {
           <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: "0.12em", color: "var(--gold)" }}>ULYSSES</div>
           <div style={{ fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", color: "var(--muted)" }}>PROTOCOL</div>
         </div>
-      </a>
+      </Link>
 
       {/* Nav links */}
       <nav className="hidden md:flex items-center gap-8">
-        {[
-          { label: "Home", href: "/" },
-          { label: "Commitment", href: "/commitment" },
-          { label: "Leaderboard", href: "/leaderboard" },
-          { label: "Docs", href: "/docs" },
-        ].map((item) => {
-          const active = isActive(item.href);
+        {navItems.map((item) => {
+          const active = isActive(item.href, item.tabKey);
           return (
-            <a
+            <Link
               key={item.label}
               href={item.href}
               style={{
@@ -61,16 +70,17 @@ export function NavBar() {
                 paddingBottom: 4,
                 borderBottom: active ? "1.5px solid var(--gold)" : "1.5px solid transparent",
                 textShadow: active ? "0 0 12px rgba(201,169,110,0.4)" : "none",
+                textDecoration: "none",
               }}
               onMouseEnter={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--foreground)";
+                if (!active) (e.currentTarget as HTMLElement).style.color = "var(--foreground)";
               }}
               onMouseLeave={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--muted)";
+                if (!active) (e.currentTarget as HTMLElement).style.color = "var(--muted)";
               }}
             >
               {item.label}
-            </a>
+            </Link>
           );
         })}
       </nav>

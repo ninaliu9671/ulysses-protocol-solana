@@ -14,8 +14,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   getU8Decoder,
@@ -100,7 +98,7 @@ export type CreateNoTradeWindowInstruction<
 export type CreateNoTradeWindowInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   windowStartHour: number;
   windowEndHour: number;
   nonce: bigint;
@@ -108,7 +106,7 @@ export type CreateNoTradeWindowInstructionData = {
 
 export type CreateNoTradeWindowInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   windowStartHour: number;
   windowEndHour: number;
   nonce: number | bigint;
@@ -119,7 +117,7 @@ export function getCreateNoTradeWindowInstructionDataEncoder(): FixedSizeEncoder
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["windowStartHour", getU8Encoder()],
       ["windowEndHour", getU8Encoder()],
       ["nonce", getU64Encoder()],
@@ -135,7 +133,7 @@ export function getCreateNoTradeWindowInstructionDataDecoder(): FixedSizeDecoder
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["windowStartHour", getU8Decoder()],
     ["windowEndHour", getU8Decoder()],
     ["nonce", getU64Decoder()],
@@ -167,7 +165,7 @@ export type CreateNoTradeWindowAsyncInput<
   agentGuardianPda?: Address<TAccountAgentGuardianPda>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateNoTradeWindowInstructionDataArgs["stakeAmount"];
-  durationDays: CreateNoTradeWindowInstructionDataArgs["durationDays"];
+  durationSeconds: CreateNoTradeWindowInstructionDataArgs["durationSeconds"];
   windowStartHour: CreateNoTradeWindowInstructionDataArgs["windowStartHour"];
   windowEndHour: CreateNoTradeWindowInstructionDataArgs["windowEndHour"];
   nonce: CreateNoTradeWindowInstructionDataArgs["nonce"];
@@ -290,7 +288,7 @@ export type CreateNoTradeWindowInput<
   agentGuardianPda: Address<TAccountAgentGuardianPda>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateNoTradeWindowInstructionDataArgs["stakeAmount"];
-  durationDays: CreateNoTradeWindowInstructionDataArgs["durationDays"];
+  durationSeconds: CreateNoTradeWindowInstructionDataArgs["durationSeconds"];
   windowStartHour: CreateNoTradeWindowInstructionDataArgs["windowStartHour"];
   windowEndHour: CreateNoTradeWindowInstructionDataArgs["windowEndHour"];
   nonce: CreateNoTradeWindowInstructionDataArgs["nonce"];

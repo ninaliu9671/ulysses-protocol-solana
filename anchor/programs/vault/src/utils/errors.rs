@@ -6,7 +6,7 @@ pub enum ErrorCode {
     StakeBelowMin,
     #[msg("stake_amount above protocol cap")]
     StakeAboveMax,
-    #[msg("duration_days out of range [1, 365]")]
+    #[msg("duration_seconds out of range [60, 31536000]")]
     DurationOutOfRange,
     #[msg("baseline must be greater than zero")]
     BaselineZero,

@@ -2,6 +2,7 @@
 
 import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
 import { useProtocolStats } from "../lib/hooks/use-protocol-stats";
+import { lamportsToDisplaySol } from "../lib/lamports";
 
 export function HeroSection() {
   return (
@@ -137,8 +138,8 @@ function StatsBar() {
   const metrics = useProtocolMetrics();
   const { stats: protocolStats } = useProtocolStats();
 
-  const fmt = (lamports: bigint | undefined): string =>
-    lamports === undefined ? "—" : (Number(lamports) / 1e9).toFixed(2) + " SOL";
+  const fmt = (l: bigint | undefined): string =>
+    l === undefined ? "—" : lamportsToDisplaySol(l, 2) + " SOL";
 
   const totalSlashed = protocolStats
     ? BigInt(protocolStats.total_slashed_lamports)

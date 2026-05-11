@@ -27,14 +27,14 @@ pub const SEED_AUTHORITY: Pubkey = pubkey!("7xnji33BGTxreohNTGfHtLuWCuqu8Sj2zGb7
 
 fn validate_common(
     stake_amount: u64,
-    duration_days: u16,
+    duration_seconds: u64,
     commit_timestamp: i64,
     now: i64,
 ) -> Result<()> {
     require!(stake_amount >= MIN_STAKE_LAMPORTS, ErrorCode::StakeBelowMin);
     require!(stake_amount <= MAX_STAKE_LAMPORTS, ErrorCode::StakeAboveMax);
     require!(
-        duration_days >= MIN_DURATION_DAYS && duration_days <= MAX_DURATION_DAYS,
+        duration_seconds >= MIN_DURATION_SECONDS && duration_seconds <= MAX_DURATION_SECONDS,
         ErrorCode::DurationOutOfRange
     );
     require!(commit_timestamp <= now, ErrorCode::DurationOutOfRange);
@@ -86,12 +86,12 @@ pub struct SeedCreateNoSell<'info> {
 pub fn seed_create_no_sell(
     ctx: Context<SeedCreateNoSell>,
     stake_amount: u64,
-    duration_days: u16,
+    duration_seconds: u64,
     floor_amount: u64,
     commit_timestamp: i64,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    validate_common(stake_amount, duration_days, commit_timestamp, now)?;
+    validate_common(stake_amount, duration_seconds, commit_timestamp, now)?;
     require!(floor_amount > 0, ErrorCode::FloorOutOfRange);
 
     transfer(
@@ -106,7 +106,7 @@ pub fn seed_create_no_sell(
     )?;
 
     let weight_u128 = (stake_amount as u128)
-        .checked_mul(duration_days as u128)
+        .checked_mul(duration_seconds as u128)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
     let weight = integer_sqrt_u128(weight_u128);
     require!(weight > 0, ErrorCode::ArithmeticOverflow);
@@ -118,7 +118,7 @@ pub fn seed_create_no_sell(
         / PRECISION;
 
     let expires_at = commit_timestamp
-        .checked_add((duration_days as i64) * SECONDS_PER_DAY)
+        .checked_add(duration_seconds as i64)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
 
     let owner_key = ctx.accounts.owner.key();
@@ -192,12 +192,12 @@ pub struct SeedCreateHoldAbove<'info> {
 pub fn seed_create_hold_above(
     ctx: Context<SeedCreateHoldAbove>,
     stake_amount: u64,
-    duration_days: u16,
+    duration_seconds: u64,
     floor_amount: u64,
     commit_timestamp: i64,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    validate_common(stake_amount, duration_days, commit_timestamp, now)?;
+    validate_common(stake_amount, duration_seconds, commit_timestamp, now)?;
     require!(floor_amount > 0, ErrorCode::FloorOutOfRange);
 
     transfer(
@@ -212,7 +212,7 @@ pub fn seed_create_hold_above(
     )?;
 
     let weight_u128 = (stake_amount as u128)
-        .checked_mul(duration_days as u128)
+        .checked_mul(duration_seconds as u128)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
     let weight = integer_sqrt_u128(weight_u128);
     require!(weight > 0, ErrorCode::ArithmeticOverflow);
@@ -224,7 +224,7 @@ pub fn seed_create_hold_above(
         / PRECISION;
 
     let expires_at = commit_timestamp
-        .checked_add((duration_days as i64) * SECONDS_PER_DAY)
+        .checked_add(duration_seconds as i64)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
 
     let owner_key = ctx.accounts.owner.key();
@@ -260,7 +260,7 @@ pub fn seed_create_hold_above(
 // ───── seed NoTradeWindow ─────
 
 #[derive(Accounts)]
-#[instruction(stake_amount: u64, duration_days: u16, window_start_hour: u8, window_end_hour: u8, nonce: u64, commit_timestamp: i64)]
+#[instruction(stake_amount: u64, duration_seconds: u64, window_start_hour: u8, window_end_hour: u8, nonce: u64, commit_timestamp: i64)]
 pub struct SeedCreateNoTradeWindow<'info> {
     #[account(mut, address = SEED_AUTHORITY @ ErrorCode::Unauthorized)]
     pub seed_authority: Signer<'info>,
@@ -296,14 +296,14 @@ pub struct SeedCreateNoTradeWindow<'info> {
 pub fn seed_create_no_trade_window(
     ctx: Context<SeedCreateNoTradeWindow>,
     stake_amount: u64,
-    duration_days: u16,
+    duration_seconds: u64,
     window_start_hour: u8,
     window_end_hour: u8,
     nonce: u64,
     commit_timestamp: i64,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    validate_common(stake_amount, duration_days, commit_timestamp, now)?;
+    validate_common(stake_amount, duration_seconds, commit_timestamp, now)?;
     require!(window_start_hour < 24 && window_end_hour < 24, ErrorCode::DurationOutOfRange);
     require!(window_start_hour != window_end_hour, ErrorCode::DurationOutOfRange);
 
@@ -319,7 +319,7 @@ pub fn seed_create_no_trade_window(
     )?;
 
     let weight_u128 = (stake_amount as u128)
-        .checked_mul(duration_days as u128)
+        .checked_mul(duration_seconds as u128)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
     let weight = integer_sqrt_u128(weight_u128);
     require!(weight > 0, ErrorCode::ArithmeticOverflow);
@@ -331,7 +331,7 @@ pub fn seed_create_no_trade_window(
         / PRECISION;
 
     let expires_at = commit_timestamp
-        .checked_add((duration_days as i64) * SECONDS_PER_DAY)
+        .checked_add(duration_seconds as i64)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
 
     let owner_key = ctx.accounts.owner.key();
@@ -402,12 +402,12 @@ pub struct SeedCreateAgentGuardian<'info> {
 pub fn seed_create_agent_guardian(
     ctx: Context<SeedCreateAgentGuardian>,
     stake_amount: u64,
-    duration_days: u16,
+    duration_seconds: u64,
     guardian_pubkey: Pubkey,
     commit_timestamp: i64,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    validate_common(stake_amount, duration_days, commit_timestamp, now)?;
+    validate_common(stake_amount, duration_seconds, commit_timestamp, now)?;
 
     transfer(
         CpiContext::new(
@@ -421,7 +421,7 @@ pub fn seed_create_agent_guardian(
     )?;
 
     let weight_u128 = (stake_amount as u128)
-        .checked_mul(duration_days as u128)
+        .checked_mul(duration_seconds as u128)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
     let weight = integer_sqrt_u128(weight_u128);
     require!(weight > 0, ErrorCode::ArithmeticOverflow);
@@ -433,7 +433,7 @@ pub fn seed_create_agent_guardian(
         / PRECISION;
 
     let expires_at = commit_timestamp
-        .checked_add((duration_days as i64) * SECONDS_PER_DAY)
+        .checked_add(duration_seconds as i64)
         .ok_or(ErrorCode::ArithmeticOverflow)?;
 
     let owner_key = ctx.accounts.owner.key();

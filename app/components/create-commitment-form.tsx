@@ -22,8 +22,8 @@ import {
 } from "../generated/vault";
 import { COMMITMENT_TYPES, TYPE_BY_KEY, type CommitmentTypeKey } from "../lib/commitment-types";
 import { saveCachedCommitment } from "../lib/my-commitments-cache";
+import { displaySolToLamports } from "../lib/lamports";
 
-const DURATION_PRESETS = [7, 30, 90, 180, 365];
 
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 
@@ -85,24 +85,35 @@ export function CreateCommitmentForm() {
 
   const [type, setType] = useState<CommitmentTypeKey>("NoSell");
   const [targetMint, setTargetMint] = useState("");
-  const [durationDays, setDurationDays] = useState("30");
-  const [stakeSol, setStakeSol] = useState("0.05");
+  const [durMonths, setDurMonths] = useState("");
+  const [durDays, setDurDays] = useState("30");
+  const [durHours, setDurHours] = useState("");
+  const [durMinutes, setDurMinutes] = useState("");
+  const [stakeSol, setStakeSol] = useState("500");
   const [floorAmount, setFloorAmount] = useState("");
   const [windowStart, setWindowStart] = useState("2");
   const [windowEnd, setWindowEnd] = useState("5");
   const [guardian, setGuardian] = useState("");
 
+  const durationSeconds = useMemo(() => {
+    const m = parseInt(durMonths, 10) || 0;
+    const d = parseInt(durDays, 10) || 0;
+    const h = parseInt(durHours, 10) || 0;
+    const min = parseInt(durMinutes, 10) || 0;
+    return m * 30 * 86400 + d * 86400 + h * 3600 + min * 60;
+  }, [durMonths, durDays, durHours, durMinutes]);
+
   // Derived: weight + share
   const weight = useMemo(() => {
     try {
-      const stakeLamports = BigInt(Math.floor(parseFloat(stakeSol) * 1e9));
-      const days = BigInt(parseInt(durationDays, 10));
-      if (stakeLamports <= 0n || days <= 0n) return 0n;
-      return integerSqrt(stakeLamports * days);
+      const stakeLamports = displaySolToLamports(parseFloat(stakeSol));
+      const secs = BigInt(durationSeconds);
+      if (stakeLamports <= 0n || secs <= 0n) return 0n;
+      return integerSqrt(stakeLamports * secs);
     } catch {
       return 0n;
     }
-  }, [stakeSol, durationDays]);
+  }, [stakeSol, durationSeconds]);
 
   const networkTotal = metrics?.totalWeight ?? 0n;
   const sharePct = useMemo(() => {
@@ -160,10 +171,10 @@ export function CreateCommitmentForm() {
       return;
     }
     try {
-      const stakeLamports = BigInt(Math.floor(parseFloat(stakeSol) * 1e9));
-      if (stakeLamports < 10_000_000n) throw new Error("Minimum stake is 0.01 SOL");
-      const days = parseInt(durationDays, 10);
-      if (!days || days < 1 || days > 365) throw new Error("Duration must be 1-365 days");
+      const stakeLamports = displaySolToLamports(parseFloat(stakeSol));
+      if (stakeLamports < 10_000_000n) throw new Error("Minimum stake is 100 SOL");
+      const secs = durationSeconds;
+      if (!secs || secs < 60 || secs > 31_536_000) throw new Error("Duration must be 1 minute – 365 days");
 
       let ix;
       // Capture-once values needed both for ix construction and for the
@@ -184,7 +195,7 @@ export function CreateCommitmentForm() {
             owner: signer,
             targetMint: address(targetMint),
             stakeAmount: stakeLamports,
-            durationDays: days,
+            durationSeconds: secs,
           });
           ix = {
             ...baseIx,
@@ -216,7 +227,7 @@ export function CreateCommitmentForm() {
             owner: signer,
             targetMint: address(targetMint),
             stakeAmount: stakeLamports,
-            durationDays: days,
+            durationSeconds: secs,
             floorAmount: floorBig,
           });
           ix = {
@@ -239,7 +250,7 @@ export function CreateCommitmentForm() {
           ix = await getCreateNoTradeWindowInstructionAsync({
             owner: signer,
             stakeAmount: stakeLamports,
-            durationDays: days,
+            durationSeconds: secs,
             windowStartHour: sh,
             windowEndHour: eh,
             nonce: nonceForCache,
@@ -251,7 +262,7 @@ export function CreateCommitmentForm() {
           ix = await getCreateAgentGuardianInstructionAsync({
             owner: signer,
             stakeAmount: stakeLamports,
-            durationDays: days,
+            durationSeconds: secs,
             guardianPubkey: address(guardian) as Address,
           });
           break;
@@ -269,7 +280,7 @@ export function CreateCommitmentForm() {
         const baseCache = {
           owner,
           stakeLamports: stakeLamports.toString(),
-          durationDays: days,
+          durationSeconds: secs,
           createdAt: nowSec,
         };
         if (type === "NoSell") {
@@ -422,34 +433,30 @@ export function CreateCommitmentForm() {
       )}
 
       {/* Duration */}
-      <Field label="DURATION (DAYS)">
-        <div className="flex gap-2 mb-2 flex-wrap">
-          {DURATION_PRESETS.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDurationDays(String(d))}
-              className="px-3 py-1 rounded text-xs"
-              style={{
-                background: durationDays === String(d) ? "var(--gold)" : "var(--input)",
-                color: durationDays === String(d) ? "var(--background)" : "var(--foreground)",
-                border: "1px solid var(--border)",
-              }}
-            >
-              {d}d
-            </button>
+      <Field label="DURATION">
+        <div className="flex items-center gap-2 flex-wrap">
+          {([
+            { value: durMonths, set: setDurMonths, label: "months" },
+            { value: durDays,   set: setDurDays,   label: "days" },
+            { value: durHours,  set: setDurHours,  label: "hours" },
+            { value: durMinutes, set: setDurMinutes, label: "minutes" },
+          ] as const).map(({ value, set, label }) => (
+            <div key={label} className="flex items-center gap-1.5">
+              <input
+                value={value}
+                onChange={(e) => set(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="0"
+                className="w-14 px-2 py-1 rounded text-sm text-center"
+                style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+              />
+              <span className="text-xs" style={{ color: "var(--muted)" }}>{label}</span>
+            </div>
           ))}
-          <input
-            value={durationDays}
-            onChange={(e) => setDurationDays(e.target.value.trim())}
-            className="flex-1 min-w-[80px] px-3 py-1 rounded text-sm"
-            style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
-          />
         </div>
       </Field>
 
       {/* Stake */}
-      <Field label="STAKE AMOUNT (SOL, ≥ 0.01)">
+      <Field label="STAKE AMOUNT (SOL, ≥ 100)">
         <input
           value={stakeSol}
           onChange={(e) => setStakeSol(e.target.value.trim())}

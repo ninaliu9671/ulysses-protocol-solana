@@ -16,8 +16,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   transformEncoder,
@@ -90,13 +88,13 @@ export type CreateAgentGuardianInstruction<
 export type CreateAgentGuardianInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   guardianPubkey: Address;
 };
 
 export type CreateAgentGuardianInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   guardianPubkey: Address;
 };
 
@@ -105,7 +103,7 @@ export function getCreateAgentGuardianInstructionDataEncoder(): FixedSizeEncoder
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["guardianPubkey", getAddressEncoder()],
     ]),
     (value) => ({
@@ -119,7 +117,7 @@ export function getCreateAgentGuardianInstructionDataDecoder(): FixedSizeDecoder
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["guardianPubkey", getAddressDecoder()],
   ]);
 }
@@ -147,7 +145,7 @@ export type CreateAgentGuardianAsyncInput<
   rewardPool?: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateAgentGuardianInstructionDataArgs["stakeAmount"];
-  durationDays: CreateAgentGuardianInstructionDataArgs["durationDays"];
+  durationSeconds: CreateAgentGuardianInstructionDataArgs["durationSeconds"];
   guardianPubkey: CreateAgentGuardianInstructionDataArgs["guardianPubkey"];
 };
 
@@ -251,7 +249,7 @@ export type CreateAgentGuardianInput<
   rewardPool: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateAgentGuardianInstructionDataArgs["stakeAmount"];
-  durationDays: CreateAgentGuardianInstructionDataArgs["durationDays"];
+  durationSeconds: CreateAgentGuardianInstructionDataArgs["durationSeconds"];
   guardianPubkey: CreateAgentGuardianInstructionDataArgs["guardianPubkey"];
 };
 

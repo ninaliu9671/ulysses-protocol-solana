@@ -1,268 +1,51 @@
+#!/usr/bin/env node
 /**
- * Devnet seed: 12 wallets × ~28 commitments (4 types, mixed states).
- * Drives Hero / Hall of Masts / Siren Graveyard from real on-chain data.
+ * seed-devnet.mjs
  *
- * Uses seed_create_* (devnet-seed feature) so SEED_AUTHORITY pays the stake.
- * The 12 owner wallets only need a tiny SOL float for claim signing.
+ * Comprehensive timeline-based seeding script for Ulysses Protocol devnet.
+ * Creates 38 commitments across 6 phases (2026-04-15 to 2026-05-11) using
+ * the devnet-seed feature's *_seeded instructions.
  *
- * Usage: node scripts/seed-devnet.mjs [--rng-seed=<n>]
+ * Timeline phases:
+ * - Phase 0: 2026-04-15 (T-27d) - 6 commitments
+ * - Phase 1: 2026-04-22 (T-20d) - 8 commitments
+ * - Phase 2: 2026-04-29 (T-13d) - 8 commitments
+ * - Phase 3: 2026-05-04 (T-8d)  - 6 commitments
+ * - Phase 4: 2026-05-08 (T-4d)  - 6 commitments
+ * - Phase 5: 2026-05-11 (T-1d)  - 4 commitments (DEV wallet)
+ *
+ * Usage:
+ *   node scripts/seed-devnet.mjs
  */
+
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import path from "path";
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  Transaction,
-  TransactionInstruction,
-  SystemProgram,
-  ComputeBudgetProgram,
-  sendAndConfirmTransaction,
-  LAMPORTS_PER_SOL,
-} from "@solana/web3.js";
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import { AnchorProvider, Program, BN } from "@coral-xyz/anchor";
+import bs58 from "bs58";
 
-// ─── Config ───────────────────────────────────────────────────────────────
-
-const PROGRAM_ID = new PublicKey("3TyFQro3GCCfd4yV5Wmbb2Rrzh35TreXJWMfbFs5dz5S");
-const TREASURY = new PublicKey("9CYhSzFPXUQRmKncPtBFuPdRMZwumsexcDUVGaULcQo6");
-const SLASH_AUTHORITY_PUBKEY = new PublicKey("4CAGNZ1VbqVNpWRUFdHLpjmN6tnALLDMJrVMZdrRvtf6");
+// ─── Constants ────────────────────────────────────────────────────────────
 const RPC = "https://api.devnet.solana.com";
+const PROGRAM_ID = new PublicKey("3bWHBvfqVXjb2NKLA8p8Aq3h1JhXJNGRBqoNSy7pump9");
+const IDL_PATH = "./anchor/target/idl/vault.json";
 
-const SCRIPT_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
-const FUNDER_KEYPAIR_PATH = path.join(SCRIPT_DIR, "funder-keypair.json");
-const SEED_AUTH_KEYPAIR_PATH = path.join(SCRIPT_DIR, "seed-authority-keypair.json");
-const SEED_KEYS_PATH = path.join(SCRIPT_DIR, "seed-keys.json");
-const SLASHER_KEYPAIR_PATH = path.join(SCRIPT_DIR, "..", "watcher", "slasher-keypair.json");
+const FUNDER_PATH = "./funder-keypair.json";
+const SEED_AUTH_PATH = "./seed-authority-keypair.json";
+const SLASHER_PATH = "./slasher-keypair.json";
+const SEED_KEYS_PATH = "./seed-keys.json";
+const DEV_WALLET_PATH = "./dev-wallet-keypair.json";
 
-// Pretend mints — never minted on-chain. Seeded path stores them as opaque pubkeys.
-function fakeMint(suffix) {
-  // Stable, deterministic-looking 32-byte pubkey. Just needs to be a valid base58 pubkey.
-  const seed = `seed-mint-${suffix}`.padEnd(32, "x").slice(0, 32);
-  return new PublicKey(Buffer.from(seed, "utf8"));
-}
+const REWARD_POOL_SEED = "reward_pool";
+const MASTER_CHEF_SEED = "master_chef";
 
-// ─── Discriminators (match program IDL) ──────────────────────────────────
+// Timeline reference: T_now = 2026-05-12 00:00:00 UTC
+const T_NOW = 1747008000; // 2026-05-12 00:00:00 UTC
+const DAY = 86400;
 
-const DISC = {
-  seedCreateNoSell: Buffer.from([70, 18, 41, 201, 171, 52, 50, 49]),
-  seedCreateHoldAbove: Buffer.from([137, 233, 166, 156, 47, 11, 99, 38]),
-  seedCreateNoTradeWindow: Buffer.from([173, 178, 216, 149, 106, 117, 148, 224]),
-  seedCreateAgentGuardian: Buffer.from([8, 139, 90, 242, 76, 168, 198, 109]),
-  slashNoTradeWindow: Buffer.from([208, 80, 29, 54, 171, 194, 185, 20]),
-  slashAgentGuardian: Buffer.from([125, 8, 127, 167, 254, 198, 46, 74]),
-  claimNoSell: Buffer.from([20, 58, 165, 149, 24, 92, 85, 131]),
-  claimHoldAbove: Buffer.from([67, 174, 96, 201, 254, 197, 74, 115]),
-  claimNoTradeWindow: Buffer.from([179, 159, 97, 221, 64, 20, 51, 1]),
-  claimAgentGuardian: Buffer.from([114, 22, 251, 35, 221, 225, 31, 183]),
-};
+// ─── Helper Functions ─────────────────────────────────────────────────────
 
-// ─── PDA helpers ──────────────────────────────────────────────────────────
-
-function findPda(seeds) {
-  return PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
-}
-const REWARD_POOL = findPda([Buffer.from("reward_pool")]);
-const PROTOCOL_VAULT = findPda([Buffer.from("protocol_vault")]);
-const noSellPda = (owner, mint) => findPda([Buffer.from("no_sell"), owner.toBuffer(), mint.toBuffer()]);
-const holdAbovePda = (owner, mint) => findPda([Buffer.from("hold_above"), owner.toBuffer(), mint.toBuffer()]);
-const noTradePda = (owner, nonce) => {
-  const nonceBuf = Buffer.alloc(8);
-  nonceBuf.writeBigUInt64LE(BigInt(nonce));
-  return findPda([Buffer.from("no_trade"), owner.toBuffer(), nonceBuf]);
-};
-const agentGuardPda = (owner) => findPda([Buffer.from("agent_guard"), owner.toBuffer()]);
-const vaultPda = (commitment) => findPda([Buffer.from("vault"), commitment.toBuffer()]);
-
-// ─── Encoders ─────────────────────────────────────────────────────────────
-
-function u64(v) {
-  const b = Buffer.alloc(8);
-  b.writeBigUInt64LE(BigInt(v));
-  return b;
-}
-function i64(v) {
-  const b = Buffer.alloc(8);
-  b.writeBigInt64LE(BigInt(v));
-  return b;
-}
-function u16(v) {
-  const b = Buffer.alloc(2);
-  b.writeUInt16LE(v);
-  return b;
-}
-function u8(v) {
-  return Buffer.from([v & 0xff]);
-}
-
-// ─── Instruction builders ─────────────────────────────────────────────────
-
-function ixSeedCreateNoSell(seedAuth, owner, mint, stakeLamports, durationDays, floorAmount, commitTs) {
-  const commitment = noSellPda(owner, mint);
-  const vault = vaultPda(commitment);
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: seedAuth, isSigner: true, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
-      { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vault, isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: Buffer.concat([DISC.seedCreateNoSell, u64(stakeLamports), u16(durationDays), u64(floorAmount), i64(commitTs)]),
-  });
-}
-
-function ixSeedCreateHoldAbove(seedAuth, owner, mint, stakeLamports, durationDays, floorAmount, commitTs) {
-  const commitment = holdAbovePda(owner, mint);
-  const vault = vaultPda(commitment);
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: seedAuth, isSigner: true, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
-      { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vault, isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: Buffer.concat([DISC.seedCreateHoldAbove, u64(stakeLamports), u16(durationDays), u64(floorAmount), i64(commitTs)]),
-  });
-}
-
-function ixSeedCreateNoTradeWindow(seedAuth, owner, stakeLamports, durationDays, startH, endH, nonce, commitTs) {
-  const commitment = noTradePda(owner, nonce);
-  const vault = vaultPda(commitment);
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: seedAuth, isSigner: true, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vault, isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: Buffer.concat([
-      DISC.seedCreateNoTradeWindow,
-      u64(stakeLamports),
-      u16(durationDays),
-      u8(startH),
-      u8(endH),
-      u64(nonce),
-      i64(commitTs),
-    ]),
-  });
-}
-
-function ixSeedCreateAgentGuardian(seedAuth, owner, stakeLamports, durationDays, guardianPubkey, commitTs) {
-  const commitment = agentGuardPda(owner);
-  const vault = vaultPda(commitment);
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: seedAuth, isSigner: true, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vault, isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: Buffer.concat([
-      DISC.seedCreateAgentGuardian,
-      u64(stakeLamports),
-      u16(durationDays),
-      guardianPubkey.toBuffer(),
-      i64(commitTs),
-    ]),
-  });
-}
-
-function ixSlashNoTradeWindow(slasher, owner, commitment) {
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: slasher, isSigner: true, isWritable: false },
-      { pubkey: owner, isSigner: false, isWritable: true },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vaultPda(commitment), isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: PROTOCOL_VAULT, isSigner: false, isWritable: true },
-      { pubkey: TREASURY, isSigner: false, isWritable: true },
-    ],
-    data: DISC.slashNoTradeWindow,
-  });
-}
-
-function ixSlashAgentGuardian(slasher, owner, commitment) {
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: slasher, isSigner: true, isWritable: false },
-      { pubkey: owner, isSigner: false, isWritable: true },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vaultPda(commitment), isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: PROTOCOL_VAULT, isSigner: false, isWritable: true },
-      { pubkey: TREASURY, isSigner: false, isWritable: true },
-    ],
-    data: DISC.slashAgentGuardian,
-  });
-}
-
-function ixClaim(disc, owner, commitment) {
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
-      { pubkey: owner, isSigner: true, isWritable: true },
-      { pubkey: commitment, isSigner: false, isWritable: true },
-      { pubkey: vaultPda(commitment), isSigner: false, isWritable: true },
-      { pubkey: REWARD_POOL, isSigner: false, isWritable: true },
-      { pubkey: PROTOCOL_VAULT, isSigner: false, isWritable: true },
-    ],
-    data: disc,
-  });
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-async function sendTx(conn, signers, ixs, label) {
-  const tx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-    ...ixs,
-  );
-  try {
-    const sig = await sendAndConfirmTransaction(conn, tx, signers, { commitment: "confirmed", skipPreflight: false });
-    console.log(`  ✓ ${label} ${sig.slice(0, 12)}…`);
-    return sig;
-  } catch (e) {
-    const msg = e?.message ?? String(e);
-    console.log(`  ✗ ${label} FAILED: ${msg.slice(0, 200)}`);
-    if (e?.logs) e.logs.slice(0, 4).forEach((l) => console.log(`      ${l}`));
-    return null;
-  }
-}
-
-function loadKp(p) {
-  const arr = JSON.parse(readFileSync(p, "utf8"));
+function loadKp(path) {
+  const arr = JSON.parse(readFileSync(path, "utf8"));
   return Keypair.fromSecretKey(new Uint8Array(arr));
-}
-
-async function airdropFromFunder(conn, funder, recipient, lamports, label) {
-  const balance = await conn.getBalance(recipient);
-  if (balance >= lamports) {
-    console.log(`  − ${label} already has ${(balance / LAMPORTS_PER_SOL).toFixed(3)} SOL, skip funding`);
-    return;
-  }
-  const need = lamports - balance;
-  await sendTx(
-    conn,
-    [funder],
-    [SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: recipient, lamports: need })],
-    `fund ${label} ${(need / LAMPORTS_PER_SOL).toFixed(3)} SOL`,
-  );
 }
 
 function loadOrCreateSeedWallets(n) {
@@ -272,181 +55,307 @@ function loadOrCreateSeedWallets(n) {
   }
   const wallets = Array.from({ length: n }, () => Keypair.generate());
   writeFileSync(SEED_KEYS_PATH, JSON.stringify(wallets.map((w) => Array.from(w.secretKey)), null, 0));
-  console.log(`Generated ${n} seed wallets → seed-keys.json`);
+  console.log(`✓ Generated ${n} seed wallets → seed-keys.json`);
   return wallets;
 }
 
-// ─── Plan generator (28 commitments / 12 personas) ───────────────────────
-
-function generatePlan(wallets, T_now) {
-  const DAY = 86400;
-  const SOL = LAMPORTS_PER_SOL;
-  // Personas A..L (12); each has 1-3 commitments. ~28 total.
-  // status: 'active' | 'slashed' (only NoTradeWindow/AgentGuardian) | 'claimed' (any type, owner signs)
-  // For 'claimed', commit_timestamp + duration must be in the past so claim succeeds.
-  // For 'slashed', we slash right after creation (before expiry).
-  const w = wallets;
-  const guardian = wallets[11].publicKey; // shared guardian for AG personas
-  const SIREN = fakeMint("siren");
-  const TOKEN_X = fakeMint("tokenX");
-  const TOKEN_Y = fakeMint("tokenY");
-
-  /**
-   * Each item: { wallet, kind, status, ts (created), days, stake, ...kindArgs }
-   */
-  const plan = [];
-  // A: stoic — 3 active mixed
-  plan.push({ wallet: w[0], kind: "NoSell", status: "active", ts: T_now - 60 * DAY, days: 90, stake: 0.5 * SOL, mint: SIREN, floor: 1 });
-  plan.push({ wallet: w[0], kind: "HoldAbove", status: "active", ts: T_now - 30 * DAY, days: 60, stake: 0.3 * SOL, mint: TOKEN_X, floor: 1 });
-  plan.push({ wallet: w[0], kind: "NoTradeWindow", status: "active", ts: T_now - 15 * DAY, days: 30, stake: 0.2 * SOL, startH: 2, endH: 6, nonce: 1 });
-  // B: believer — 3 NoSell on different mints (all active)
-  plan.push({ wallet: w[1], kind: "NoSell", status: "active", ts: T_now - 75 * DAY, days: 180, stake: 0.8 * SOL, mint: SIREN, floor: 1 });
-  plan.push({ wallet: w[1], kind: "NoSell", status: "active", ts: T_now - 45 * DAY, days: 90, stake: 0.4 * SOL, mint: TOKEN_X, floor: 1 });
-  plan.push({ wallet: w[1], kind: "NoSell", status: "active", ts: T_now - 12 * DAY, days: 30, stake: 0.15 * SOL, mint: TOKEN_Y, floor: 1 });
-  // C: hodler — 1 long active HoldAbove + 1 already-claimed
-  plan.push({ wallet: w[2], kind: "HoldAbove", status: "active", ts: T_now - 90 * DAY, days: 365, stake: 1.2 * SOL, mint: SIREN, floor: 1 });
-  plan.push({ wallet: w[2], kind: "NoSell", status: "claimed", ts: T_now - 80 * DAY, days: 30, stake: 0.25 * SOL, mint: TOKEN_X, floor: 1 });
-  // D: window-disciplined — 2 active NoTradeWindow (different nonces)
-  plan.push({ wallet: w[3], kind: "NoTradeWindow", status: "active", ts: T_now - 25 * DAY, days: 60, stake: 0.4 * SOL, startH: 0, endH: 8, nonce: 1 });
-  plan.push({ wallet: w[3], kind: "NoTradeWindow", status: "active", ts: T_now - 8 * DAY, days: 14, stake: 0.1 * SOL, startH: 14, endH: 18, nonce: 2 });
-  // E: agent-protected — active AG
-  plan.push({ wallet: w[4], kind: "AgentGuardian", status: "active", ts: T_now - 10 * DAY, days: 90, stake: 0.6 * SOL, guardianPubkey: guardian });
-  // F: claimed-once — short already-claimed NoTradeWindow
-  plan.push({ wallet: w[5], kind: "NoTradeWindow", status: "claimed", ts: T_now - 60 * DAY, days: 14, stake: 0.18 * SOL, startH: 3, endH: 7, nonce: 1 });
-  plan.push({ wallet: w[5], kind: "HoldAbove", status: "active", ts: T_now - 6 * DAY, days: 30, stake: 0.12 * SOL, mint: SIREN, floor: 1 });
-  // G: slashed once — slashed NoTradeWindow + still has 1 active
-  plan.push({ wallet: w[6], kind: "NoTradeWindow", status: "slashed", ts: T_now - 18 * DAY, days: 30, stake: 0.35 * SOL, startH: 1, endH: 4, nonce: 1 });
-  plan.push({ wallet: w[6], kind: "NoSell", status: "active", ts: T_now - 5 * DAY, days: 30, stake: 0.2 * SOL, mint: SIREN, floor: 1 });
-  // H: agent-violator — slashed AG
-  plan.push({ wallet: w[7], kind: "AgentGuardian", status: "slashed", ts: T_now - 22 * DAY, days: 60, stake: 0.45 * SOL, guardianPubkey: guardian });
-  // I: heavy-violator — 2 slashed NoTradeWindow recent
-  plan.push({ wallet: w[8], kind: "NoTradeWindow", status: "slashed", ts: T_now - 4 * DAY, days: 14, stake: 0.25 * SOL, startH: 5, endH: 9, nonce: 1 });
-  plan.push({ wallet: w[8], kind: "NoTradeWindow", status: "slashed", ts: T_now - 1 * DAY, days: 7, stake: 0.15 * SOL, startH: 22, endH: 23, nonce: 2 });
-  // J: recent-loss — slashed AG within last 12h
-  plan.push({ wallet: w[9], kind: "AgentGuardian", status: "slashed", ts: T_now - 3600 * 10, days: 30, stake: 0.5 * SOL, guardianPubkey: guardian });
-  // K: long-game — active NoSell + already-claimed AG
-  plan.push({ wallet: w[10], kind: "NoSell", status: "active", ts: T_now - 50 * DAY, days: 180, stake: 0.7 * SOL, mint: TOKEN_Y, floor: 1 });
-  plan.push({ wallet: w[10], kind: "AgentGuardian", status: "claimed", ts: T_now - 70 * DAY, days: 30, stake: 0.3 * SOL, guardianPubkey: guardian });
-  // L: light — single small NoTradeWindow active
-  plan.push({ wallet: w[11], kind: "NoTradeWindow", status: "active", ts: T_now - 2 * DAY, days: 21, stake: 0.08 * SOL, startH: 12, endH: 14, nonce: 1 });
-  // Two more recently-slashed for graveyard freshness
-  plan.push({ wallet: w[2], kind: "NoTradeWindow", status: "slashed", ts: T_now - 3600 * 6, days: 14, stake: 0.2 * SOL, startH: 19, endH: 23, nonce: 1 });
-  plan.push({ wallet: w[5], kind: "AgentGuardian", status: "slashed", ts: T_now - 3600 * 18, days: 30, stake: 0.3 * SOL, guardianPubkey: guardian });
-
-  return plan;
+function loadOrCreateDevWallet() {
+  if (existsSync(DEV_WALLET_PATH)) {
+    return loadKp(DEV_WALLET_PATH);
+  }
+  const kp = Keypair.generate();
+  writeFileSync(DEV_WALLET_PATH, JSON.stringify(Array.from(kp.secretKey), null, 0));
+  console.log(`✓ Generated dev wallet → dev-wallet-keypair.json`);
+  console.log(`  Address: ${kp.publicKey.toBase58()}`);
+  return kp;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────
+async function sendTx(conn, signers, ixs, label) {
+  try {
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+    const tx = new (await import("@solana/web3.js")).Transaction();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = signers[0].publicKey;
+    tx.add(...ixs);
+    tx.sign(...signers);
+
+    const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
+    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+    console.log(`  ✓ ${label}`);
+    return sig;
+  } catch (e) {
+    const msg = e?.message ?? String(e);
+    console.log(`  ✗ ${label} FAILED: ${msg.slice(0, 200)}`);
+    if (e?.logs) e.logs.slice(0, 4).forEach((l) => console.log(`      ${l}`));
+    return null;
+  }
+}
+
+async function airdropFromFunder(conn, funder, recipient, lamports, label) {
+  const balance = await conn.getBalance(recipient);
+  if (balance >= lamports) {
+    console.log(`  − ${label} already has ${(balance / LAMPORTS_PER_SOL).toFixed(3)} SOL, skip`);
+    return;
+  }
+  const need = lamports - balance;
+  await sendTx(
+    conn,
+    [funder],
+    [SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: recipient, lamports: need })],
+    `Fund ${label} +${(need / LAMPORTS_PER_SOL).toFixed(3)} SOL`
+  );
+}
+
+// ─── Timeline Generator ───────────────────────────────────────────────────
+
+function generateTimeline(wallets, devWallet) {
+  const SOL = LAMPORTS_PER_SOL;
+  const guardian = wallets[11].publicKey; // Wallet L is shared guardian
+
+  // Phase timestamps
+  const T0 = T_NOW - 27 * DAY; // 2026-04-15
+  const T1 = T_NOW - 20 * DAY; // 2026-04-22
+  const T2 = T_NOW - 13 * DAY; // 2026-04-29
+  const T3 = T_NOW - 8 * DAY;  // 2026-05-04
+  const T4 = T_NOW - 4 * DAY;  // 2026-05-08
+  const T5 = T_NOW - 1 * DAY;  // 2026-05-11
+
+  const timeline = [];
+
+  // ─── Phase 0: 2026-04-15 (T-27d) ───
+  timeline.push(
+    { owner: wallets[0], type: "NoSell", principal: 10 * SOL, duration: 30 * DAY, commitTime: T0, status: "active" },
+    { owner: wallets[1], type: "NoSell", principal: 15 * SOL, duration: 60 * DAY, commitTime: T0, status: "active" },
+    { owner: wallets[2], type: "HoldAbove", principal: 8 * SOL, duration: 45 * DAY, threshold: 50_000_000, commitTime: T0, status: "active" },
+    { owner: wallets[3], type: "NoTradeWindow", principal: 12 * SOL, duration: 30 * DAY, windowStart: T0 + 10 * DAY, windowEnd: T0 + 20 * DAY, commitTime: T0, status: "slashed" },
+    { owner: wallets[4], type: "AgentGuardian", principal: 20 * SOL, duration: 90 * DAY, guardian, commitTime: T0, status: "active" },
+    { owner: wallets[5], type: "NoSell", principal: 5 * SOL, duration: 14 * DAY, commitTime: T0, status: "claimed" }
+  );
+
+  // ─── Phase 1: 2026-04-22 (T-20d) ───
+  timeline.push(
+    { owner: wallets[0], type: "HoldAbove", principal: 7 * SOL, duration: 30 * DAY, threshold: 45_000_000, commitTime: T1, status: "active" },
+    { owner: wallets[1], type: "NoTradeWindow", principal: 10 * SOL, duration: 25 * DAY, windowStart: T1 + 5 * DAY, windowEnd: T1 + 15 * DAY, commitTime: T1, status: "active" },
+    { owner: wallets[2], type: "NoSell", principal: 18 * SOL, duration: 60 * DAY, commitTime: T1, status: "active" },
+    { owner: wallets[6], type: "NoSell", principal: 9 * SOL, duration: 21 * DAY, commitTime: T1, status: "active" },
+    { owner: wallets[7], type: "AgentGuardian", principal: 25 * SOL, duration: 60 * DAY, guardian, commitTime: T1, status: "active" },
+    { owner: wallets[8], type: "HoldAbove", principal: 6 * SOL, duration: 30 * DAY, threshold: 40_000_000, commitTime: T1, status: "active" },
+    { owner: wallets[3], type: "NoSell", principal: 11 * SOL, duration: 14 * DAY, commitTime: T1, status: "claimed" },
+    { owner: wallets[9], type: "NoSell", principal: 4 * SOL, duration: 7 * DAY, commitTime: T1, status: "claimed" }
+  );
+
+  // ─── Phase 2: 2026-04-29 (T-13d) ───
+  timeline.push(
+    { owner: wallets[4], type: "NoSell", principal: 13 * SOL, duration: 45 * DAY, commitTime: T2, status: "active" },
+    { owner: wallets[5], type: "HoldAbove", principal: 8 * SOL, duration: 30 * DAY, threshold: 55_000_000, commitTime: T2, status: "active" },
+    { owner: wallets[6], type: "NoTradeWindow", principal: 14 * SOL, duration: 20 * DAY, windowStart: T2 + 5 * DAY, windowEnd: T2 + 10 * DAY, commitTime: T2, status: "slashed" },
+    { owner: wallets[7], type: "NoSell", principal: 16 * SOL, duration: 30 * DAY, commitTime: T2, status: "active" },
+    { owner: wallets[8], type: "AgentGuardian", principal: 22 * SOL, duration: 75 * DAY, guardian, commitTime: T2, status: "active" },
+    { owner: wallets[9], type: "NoSell", principal: 7 * SOL, duration: 14 * DAY, commitTime: T2, status: "active" },
+    { owner: wallets[10], type: "HoldAbove", principal: 9 * SOL, duration: 30 * DAY, threshold: 48_000_000, commitTime: T2, status: "active" },
+    { owner: wallets[11], type: "NoSell", principal: 5 * SOL, duration: 7 * DAY, commitTime: T2, status: "claimed" }
+  );
+
+  // ─── Phase 3: 2026-05-04 (T-8d) ───
+  timeline.push(
+    { owner: wallets[0], type: "NoSell", principal: 12 * SOL, duration: 30 * DAY, commitTime: T3, status: "active" },
+    { owner: wallets[1], type: "AgentGuardian", principal: 28 * SOL, duration: 60 * DAY, guardian, commitTime: T3, status: "active" },
+    { owner: wallets[2], type: "NoTradeWindow", principal: 11 * SOL, duration: 15 * DAY, windowStart: T3 + 3 * DAY, windowEnd: T3 + 8 * DAY, commitTime: T3, status: "active" },
+    { owner: wallets[3], type: "HoldAbove", principal: 10 * SOL, duration: 30 * DAY, threshold: 52_000_000, commitTime: T3, status: "active" },
+    { owner: wallets[10], type: "NoSell", principal: 6 * SOL, duration: 14 * DAY, commitTime: T3, status: "active" },
+    { owner: wallets[4], type: "NoSell", principal: 8 * SOL, duration: 7 * DAY, commitTime: T3, status: "claimed" }
+  );
+
+  // ─── Phase 4: 2026-05-08 (T-4d) ───
+  timeline.push(
+    { owner: wallets[5], type: "NoSell", principal: 14 * SOL, duration: 30 * DAY, commitTime: T4, status: "active" },
+    { owner: wallets[6], type: "HoldAbove", principal: 9 * SOL, duration: 30 * DAY, threshold: 46_000_000, commitTime: T4, status: "active" },
+    { owner: wallets[7], type: "NoTradeWindow", principal: 13 * SOL, duration: 20 * DAY, windowStart: T4 + 5 * DAY, windowEnd: T4 + 12 * DAY, commitTime: T4, status: "active" },
+    { owner: wallets[8], type: "NoSell", principal: 17 * SOL, duration: 45 * DAY, commitTime: T4, status: "active" },
+    { owner: wallets[9], type: "AgentGuardian", principal: 24 * SOL, duration: 60 * DAY, guardian, commitTime: T4, status: "active" },
+    { owner: wallets[11], type: "NoSell", principal: 5 * SOL, duration: 7 * DAY, commitTime: T4, status: "active" }
+  );
+
+  // ─── Phase 5: 2026-05-11 (T-1d) - DEV WALLET ───
+  timeline.push(
+    { owner: devWallet, type: "NoSell", principal: 3 * SOL, duration: 30 * DAY, commitTime: T5, status: "active" },
+    { owner: devWallet, type: "HoldAbove", principal: 2 * SOL, duration: 30 * DAY, threshold: 50_000_000, commitTime: T5, status: "active" },
+    { owner: devWallet, type: "NoTradeWindow", principal: 2.5 * SOL, duration: 20 * DAY, windowStart: T5 + 5 * DAY, windowEnd: T5 + 10 * DAY, commitTime: T5, status: "active" },
+    { owner: devWallet, type: "AgentGuardian", principal: 4 * SOL, duration: 45 * DAY, guardian, commitTime: T5, status: "active" }
+  );
+
+  return timeline;
+}
+
+// ─── Main Execution ───────────────────────────────────────────────────────
 
 async function main() {
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  Ulysses Protocol Devnet Seeding (Timeline Mode)");
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  // Load keypairs
+  console.log("1. Loading keypairs...");
+  const funder = loadKp(FUNDER_PATH);
+  const seedAuth = loadKp(SEED_AUTH_PATH);
+  const slasher = loadKp(SLASHER_PATH);
+  const seedWallets = loadOrCreateSeedWallets(12);
+  const devWallet = loadOrCreateDevWallet();
+
+  console.log(`  Funder:        ${funder.publicKey.toBase58()}`);
+  console.log(`  Seed Auth:     ${seedAuth.publicKey.toBase58()}`);
+  console.log(`  Slasher:       ${slasher.publicKey.toBase58()}`);
+  console.log(`  Dev Wallet:    ${devWallet.publicKey.toBase58()}`);
+  console.log(`  Seed Wallets:  ${seedWallets.length} loaded\n`);
+
+  // Setup connection and program
   const conn = new Connection(RPC, "confirmed");
+  const idl = JSON.parse(readFileSync(IDL_PATH, "utf8"));
+  const provider = new AnchorProvider(conn, { publicKey: funder.publicKey }, { commitment: "confirmed" });
+  const program = new Program(idl, PROGRAM_ID, provider);
 
-  const funder = loadKp(FUNDER_KEYPAIR_PATH);
-  const seedAuth = loadKp(SEED_AUTH_KEYPAIR_PATH);
-  const slasher = loadKp(SLASHER_KEYPAIR_PATH);
+  // Derive PDAs
+  const [rewardPool] = PublicKey.findProgramAddressSync(
+    [Buffer.from(REWARD_POOL_SEED)],
+    PROGRAM_ID
+  );
+  const [masterChef] = PublicKey.findProgramAddressSync(
+    [Buffer.from(MASTER_CHEF_SEED)],
+    PROGRAM_ID
+  );
 
-  console.log("Funder:        ", funder.publicKey.toBase58());
-  console.log("SeedAuthority: ", seedAuth.publicKey.toBase58());
-  console.log("Slasher:       ", slasher.publicKey.toBase58());
-  console.log("RewardPool:    ", REWARD_POOL.toBase58());
+  console.log("2. Funding wallets...");
+  await airdropFromFunder(conn, funder, seedAuth.publicKey, 5 * LAMPORTS_PER_SOL, "Seed Auth");
+  await airdropFromFunder(conn, funder, slasher.publicKey, 2 * LAMPORTS_PER_SOL, "Slasher");
+  await airdropFromFunder(conn, funder, devWallet.publicKey, 1 * LAMPORTS_PER_SOL, "Dev Wallet");
 
-  const rpInfo = await conn.getAccountInfo(REWARD_POOL);
-  if (!rpInfo) {
-    console.log("\n✗ RewardPool not initialized. Run scripts/initialize.mjs first.");
-    process.exit(1);
+  for (let i = 0; i < seedWallets.length; i++) {
+    await airdropFromFunder(conn, funder, seedWallets[i].publicKey, 0.5 * LAMPORTS_PER_SOL, `Seed Wallet ${i}`);
   }
+  console.log();
 
-  // 1. Fund seedAuthority + slasher
-  console.log("\n=== Fund seedAuthority + slasher ===");
-  await airdropFromFunder(conn, funder, seedAuth.publicKey, 12 * LAMPORTS_PER_SOL, "seedAuthority");
-  await airdropFromFunder(conn, funder, slasher.publicKey, 1.5 * LAMPORTS_PER_SOL, "slasher");
+  // Generate timeline
+  const timeline = generateTimeline(seedWallets, devWallet);
+  console.log(`3. Generated timeline: ${timeline.length} commitments across 6 phases\n`);
 
-  // 2. Load/create 12 seed wallets
-  const wallets = loadOrCreateSeedWallets(12);
-  console.log(`\n=== Fund 12 seed wallets ===`);
-  for (let i = 0; i < wallets.length; i++) {
-    await airdropFromFunder(conn, funder, wallets[i].publicKey, 0.05 * LAMPORTS_PER_SOL, `wallet-${i}`);
-  }
+  // Execute timeline
+  console.log("4. Creating commitments...\n");
 
-  // 3. Build plan
-  const T_now = Math.floor(Date.now() / 1000);
-  const plan = generatePlan(wallets, T_now);
-  console.log(`\n=== Plan: ${plan.length} commitments ===`);
+  let activeCount = 0;
+  let slashedCount = 0;
+  let claimedCount = 0;
 
-  let createdN = 0, slashedN = 0, claimedN = 0, skippedN = 0;
+  for (let i = 0; i < timeline.length; i++) {
+    const entry = timeline[i];
+    const { owner, type, principal, duration, commitTime, status } = entry;
 
-  // 4. Create each commitment
-  for (let idx = 0; idx < plan.length; idx++) {
-    const it = plan[idx];
-    const ownerPk = it.wallet.publicKey;
-    let createIx;
-    let commitmentPda;
-    let claimDisc;
-    let slashIx = null;
+    const ownerPubkey = owner.publicKey;
+    const [commitment] = PublicKey.findProgramAddressSync(
+      [Buffer.from("commitment"), ownerPubkey.toBuffer()],
+      PROGRAM_ID
+    );
 
-    if (it.kind === "NoSell") {
-      commitmentPda = noSellPda(ownerPk, it.mint);
-      createIx = ixSeedCreateNoSell(seedAuth.publicKey, ownerPk, it.mint, it.stake, it.days, it.floor, it.ts);
-      claimDisc = DISC.claimNoSell;
-    } else if (it.kind === "HoldAbove") {
-      commitmentPda = holdAbovePda(ownerPk, it.mint);
-      createIx = ixSeedCreateHoldAbove(seedAuth.publicKey, ownerPk, it.mint, it.stake, it.days, it.floor, it.ts);
-      claimDisc = DISC.claimHoldAbove;
-    } else if (it.kind === "NoTradeWindow") {
-      commitmentPda = noTradePda(ownerPk, it.nonce);
-      createIx = ixSeedCreateNoTradeWindow(seedAuth.publicKey, ownerPk, it.stake, it.days, it.startH, it.endH, it.nonce, it.ts);
-      claimDisc = DISC.claimNoTradeWindow;
-      slashIx = ixSlashNoTradeWindow(slasher.publicKey, ownerPk, commitmentPda);
-    } else if (it.kind === "AgentGuardian") {
-      commitmentPda = agentGuardPda(ownerPk);
-      createIx = ixSeedCreateAgentGuardian(seedAuth.publicKey, ownerPk, it.stake, it.days, it.guardianPubkey, it.ts);
-      claimDisc = DISC.claimAgentGuardian;
-      slashIx = ixSlashAgentGuardian(slasher.publicKey, ownerPk, commitmentPda);
-    }
+    const label = `[${i + 1}/${timeline.length}] ${type} ${(principal / LAMPORTS_PER_SOL).toFixed(1)} SOL (${status})`;
 
-    // Skip if commitment already exists (idempotent)
-    const existing = await conn.getAccountInfo(commitmentPda);
-    const label = `[${idx + 1}/${plan.length}] ${it.kind} ${it.status} owner=${ownerPk.toBase58().slice(0, 6)}…`;
-    if (existing) {
-      console.log(`${label}  (already exists, skipping create)`);
-      skippedN++;
-      continue;
-    }
+    try {
+      // Build instruction based on type
+      let ix;
+      const commonAccounts = {
+        commitment,
+        owner: ownerPubkey,
+        seedAuthority: seedAuth.publicKey,
+        rewardPool,
+        masterChef,
+        systemProgram: SystemProgram.programId,
+      };
 
-    console.log(label);
-    const createSig = await sendTx(conn, [seedAuth], [createIx], "create");
-    if (!createSig) continue;
-    createdN++;
-
-    if (it.status === "slashed") {
-      if (!slashIx) {
-        console.log("  − slashed status only valid for NoTradeWindow/AgentGuardian; skip slash");
-        continue;
+      if (type === "NoSell") {
+        ix = await program.methods
+          .noSellSeeded(new BN(principal), new BN(duration), new BN(commitTime))
+          .accounts(commonAccounts)
+          .instruction();
+      } else if (type === "HoldAbove") {
+        ix = await program.methods
+          .holdAboveSeeded(new BN(principal), new BN(duration), new BN(entry.threshold), new BN(commitTime))
+          .accounts(commonAccounts)
+          .instruction();
+      } else if (type === "NoTradeWindow") {
+        ix = await program.methods
+          .noTradeWindowSeeded(
+            new BN(principal),
+            new BN(duration),
+            new BN(entry.windowStart),
+            new BN(entry.windowEnd),
+            new BN(commitTime)
+          )
+          .accounts(commonAccounts)
+          .instruction();
+      } else if (type === "AgentGuardian") {
+        ix = await program.methods
+          .agentGuardianSeeded(new BN(principal), new BN(duration), entry.guardian, new BN(commitTime))
+          .accounts(commonAccounts)
+          .instruction();
       }
-      const sig = await sendTx(conn, [slasher], [slashIx], "slash");
-      if (sig) slashedN++;
-    } else if (it.status === "claimed") {
-      // owner signs claim — must already be expired (commit_ts + days < now)
-      const expiresAt = it.ts + it.days * 86400;
-      if (expiresAt > T_now) {
-        console.log(`  − cannot claim: not yet expired (expiresAt=${expiresAt}, now=${T_now})`);
-        continue;
+
+      const sig = await sendTx(conn, [seedAuth], [ix], label);
+      if (!sig) continue;
+
+      // Handle post-creation actions
+      if (status === "slashed") {
+        // Slash immediately
+        const slashIx = await program.methods
+          .slash()
+          .accounts({
+            commitment,
+            slasher: slasher.publicKey,
+            rewardPool,
+            masterChef,
+          })
+          .instruction();
+
+        await sendTx(conn, [slasher], [slashIx], `  └─ Slash ${type}`);
+        slashedCount++;
+      } else if (status === "claimed") {
+        // Claim (only works if commitment has expired)
+        const claimIx = await program.methods
+          .claim()
+          .accounts({
+            commitment,
+            owner: ownerPubkey,
+            rewardPool,
+            masterChef,
+          })
+          .instruction();
+
+        await sendTx(conn, [owner], [claimIx], `  └─ Claim ${type}`);
+        claimedCount++;
+      } else {
+        activeCount++;
       }
-      const sig = await sendTx(conn, [it.wallet], [ixClaim(claimDisc, ownerPk, commitmentPda)], "claim");
-      if (sig) claimedN++;
+
+      // Small delay to avoid rate limiting
+      await new Promise((r) => setTimeout(r, 500));
+    } catch (e) {
+      console.log(`  ✗ ${label} FAILED: ${e.message.slice(0, 150)}`);
     }
   }
 
-  // 5. Summary + invariants
-  console.log("\n=== Summary ===");
-  console.log(`Created:  ${createdN}`);
-  console.log(`Slashed:  ${slashedN}`);
-  console.log(`Claimed:  ${claimedN}`);
-  console.log(`Skipped:  ${skippedN}`);
-  console.log("\n✔ Seed complete. Open /commitment + /leaderboard to verify.");
+  console.log("\n═══════════════════════════════════════════════════════════");
+  console.log("  Seeding Complete");
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log(`  Active:   ${activeCount}`);
+  console.log(`  Slashed:  ${slashedCount}`);
+  console.log(`  Claimed:  ${claimedCount}`);
+  console.log(`  Total:    ${timeline.length}`);
+  console.log("\n  Next steps:");
+  console.log("  1. Start watcher: cd watcher && npm start");
+  console.log("  2. Start frontend: cd app && npm run dev");
+  console.log("  3. Check 'My Commitments' panel for DEV wallet data");
+  console.log("  4. Check 'Siren Graveyard' for slashed/claimed history");
+  console.log("═══════════════════════════════════════════════════════════\n");
 }
 
-main().catch((e) => {
-  console.error(e);
+main().catch((err) => {
+  console.error("Fatal error:", err);
   process.exit(1);
 });

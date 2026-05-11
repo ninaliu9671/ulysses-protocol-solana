@@ -43,6 +43,35 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
   const url = getClusterUrl(cluster);
   const live = useUserCommitments(owner);
 
+  // Watcher API events (cross-device, persistent)
+  const watcherUrl = process.env.NEXT_PUBLIC_WATCHER_URL || "http://localhost:3001";
+  const { data: watcherEvents, mutate: mutateWatcher } = useSWR(
+    owner ? ["watcher-events", watcherUrl, owner] : null,
+    async () => {
+      try {
+        const res = await fetch(`${watcherUrl}/events?owner=${owner}&limit=200`);
+        if (!res.ok) return null;
+        const json = await res.json();
+        return json.events as Array<{
+          kind: TerminationKind;
+          signature: string;
+          blockTime: number;
+          commitment: string;
+          owner: string;
+          principal: string;
+          typeName: string | null;
+          targetMint: string | null;
+          createdAt: number | null;
+          expiresAt: number | null;
+          yieldPaid: string | null;
+        }>;
+      } catch {
+        return null;
+      }
+    },
+    { refreshInterval: 60_000, dedupingInterval: 30_000 },
+  );
+
   // Termination events for the owner — only refresh occasionally; chain RPC
   // is rate-limited and these are read-mostly.
   const { data: terminations, mutate: mutateTerm, isLoading: termLoading } = useSWR(
@@ -160,10 +189,32 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
 
     // 2. Terminal rows: cached commitments not in `seenPubkeys`,
     // matched against termination events for status.
-    // Chain events (authoritative) take priority; local optimistic cache is fallback.
+    // Priority: watcher API > chain events > local optimistic cache
     const termByPubkey = new Map<string, NonNullable<typeof terminations>[number]>();
+
+    // Merge watcher events (convert to chain event format)
+    if (watcherEvents) {
+      for (const w of watcherEvents) {
+        if (!termByPubkey.has(w.commitment)) {
+          termByPubkey.set(w.commitment, {
+            kind: w.kind,
+            signature: w.signature,
+            blockTime: w.blockTime,
+            commitment: w.commitment,
+            owner: w.owner,
+            principal: BigInt(w.principal),
+            yieldPaid: w.yieldPaid ? BigInt(w.yieldPaid) : undefined,
+            commitmentType: (w.typeName as any) || "Unknown",
+            targetMint: w.targetMint,
+            createdAt: w.createdAt,
+            expiresAt: w.expiresAt,
+          });
+        }
+      }
+    }
+
+    // Merge chain events (watcher takes priority, so only add if not present)
     for (const t of terminations ?? []) {
-      // For idempotency keep the first match (most recent first from getSignaturesForAddress)
       if (!termByPubkey.has(t.commitment)) termByPubkey.set(t.commitment, t);
     }
     const localTermByPubkey = new Map<string, { kind: "Claimed" | "Cancelled" | "Slashed"; signature: string }>();
@@ -202,11 +253,11 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
 
     // 3. Event-only rows: termination events with no cached metadata
     // Requires post-upgrade events (createdAt/expiresAt non-null).
-    for (const t of terminations ?? []) {
-      if (seenPubkeys.has(t.commitment)) continue; // still live
-      if (cached.find((c) => c.pubkey === t.commitment)) continue; // handled above
+    for (const [commitmentPubkey, t] of termByPubkey.entries()) {
+      if (seenPubkeys.has(commitmentPubkey)) continue; // still live
+      if (cached.find((c) => c.pubkey === commitmentPubkey)) continue; // handled above
       if (t.createdAt == null || t.expiresAt == null) continue; // old event, skip
-      seenPubkeys.add(t.commitment); // prevent duplicates if multiple events for same commitment
+      seenPubkeys.add(commitmentPubkey); // prevent duplicates
       const stakeLamports = t.principal;
       const expiresAt = BigInt(t.expiresAt);
       const createdAt = BigInt(t.createdAt);
@@ -232,7 +283,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
       if (aActive !== bActive) return aActive - bActive;
       return Number(b.createdAt - a.createdAt);
     });
-  }, [live, cached, terminations]);
+  }, [live, cached, terminations, watcherEvents]);
 
   return {
     rows,
@@ -240,6 +291,7 @@ export function useMyCommitmentsWithHistory(owner: string | undefined): {
     refresh: () => {
       live.refresh();
       void mutateTerm();
+      void mutateWatcher();
     },
   };
 }

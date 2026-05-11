@@ -18,7 +18,7 @@ import { VAULT_PROGRAM_ADDRESS } from "../programs";
 export const VAULT_ERROR__STAKE_BELOW_MIN = 0x1770; // 6000
 /** StakeAboveMax: stake_amount above protocol cap */
 export const VAULT_ERROR__STAKE_ABOVE_MAX = 0x1771; // 6001
-/** DurationOutOfRange: duration_days out of range [1, 365] */
+/** DurationOutOfRange: duration_seconds out of range [60, 31536000] */
 export const VAULT_ERROR__DURATION_OUT_OF_RANGE = 0x1772; // 6002
 /** BaselineZero: baseline must be greater than zero */
 export const VAULT_ERROR__BASELINE_ZERO = 0x1773; // 6003
@@ -59,7 +59,7 @@ if (process.env.NODE_ENV !== "production") {
     [VAULT_ERROR__ARITHMETIC_OVERFLOW]: `arithmetic overflow`,
     [VAULT_ERROR__BASELINE_ZERO]: `baseline must be greater than zero`,
     [VAULT_ERROR__CONFLICTING_COMMITMENT]: `conflicting commitment exists`,
-    [VAULT_ERROR__DURATION_OUT_OF_RANGE]: `duration_days out of range [1, 365]`,
+    [VAULT_ERROR__DURATION_OUT_OF_RANGE]: `duration_seconds out of range [60, 31536000]`,
     [VAULT_ERROR__FLOOR_OUT_OF_RANGE]: `floor_amount must be in (0, baseline]`,
     [VAULT_ERROR__NOT_YET_EXPIRED]: `commitment not yet expired`,
     [VAULT_ERROR__NO_VIOLATION]: `violation not present`,

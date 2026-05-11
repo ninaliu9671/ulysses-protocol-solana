@@ -2,7 +2,7 @@ use crate::constants::*;
 use crate::events::Slashed;
 use crate::state::{NoTradeWindowCommitment, RewardPool};
 use crate::utils::errors::ErrorCode;
-use crate::utils::terminate::{move_lamports, redistribute_to_pool};
+use crate::utils::terminate::{compute_pending_yield, move_lamports, redistribute_to_pool};
 use anchor_lang::prelude::*;
 
 // v2.1: NoTradeWindow violations cannot be verified on-chain (program cannot
@@ -53,8 +53,13 @@ pub fn handler(ctx: Context<SlashNoTradeWindow>) -> Result<()> {
     let stake = ctx.accounts.commitment.stake_amount;
     let created_at = ctx.accounts.commitment.created_at;
     let expires_at = ctx.accounts.commitment.expires_at;
+    let acc = ctx.accounts.reward_pool.acc_reward_per_weight;
+    let reward_debt = ctx.accounts.commitment.reward_debt;
 
-    let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, stake)?;
+    let pending_yield = compute_pending_yield(weight, acc, reward_debt)?;
+    let total = stake.saturating_add(pending_yield);
+
+    let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, total)?;
 
     let principal_dest = if redistributed {
         ctx.accounts.protocol_vault.to_account_info()

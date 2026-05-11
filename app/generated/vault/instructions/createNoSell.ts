@@ -14,8 +14,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   transformEncoder,
@@ -106,12 +104,12 @@ export type CreateNoSellInstruction<
 export type CreateNoSellInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
 };
 
 export type CreateNoSellInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
 };
 
 export function getCreateNoSellInstructionDataEncoder(): FixedSizeEncoder<CreateNoSellInstructionDataArgs> {
@@ -119,7 +117,7 @@ export function getCreateNoSellInstructionDataEncoder(): FixedSizeEncoder<Create
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CREATE_NO_SELL_DISCRIMINATOR }),
   );
@@ -129,7 +127,7 @@ export function getCreateNoSellInstructionDataDecoder(): FixedSizeDecoder<Create
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
   ]);
 }
 
@@ -162,7 +160,7 @@ export type CreateNoSellAsyncInput<
   agentGuardianPda?: Address<TAccountAgentGuardianPda>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateNoSellInstructionDataArgs["stakeAmount"];
-  durationDays: CreateNoSellInstructionDataArgs["durationDays"];
+  durationSeconds: CreateNoSellInstructionDataArgs["durationSeconds"];
 };
 
 export async function getCreateNoSellInstructionAsync<
@@ -304,7 +302,7 @@ export type CreateNoSellInput<
   agentGuardianPda: Address<TAccountAgentGuardianPda>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateNoSellInstructionDataArgs["stakeAmount"];
-  durationDays: CreateNoSellInstructionDataArgs["durationDays"];
+  durationSeconds: CreateNoSellInstructionDataArgs["durationSeconds"];
 };
 
 export function getCreateNoSellInstruction<

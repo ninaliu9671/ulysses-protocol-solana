@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::events::Cancelled;
 use crate::state::{NoTradeWindowCommitment, RewardPool};
-use crate::utils::terminate::{move_lamports, redistribute_to_pool};
+use crate::utils::terminate::{compute_pending_yield, move_lamports, redistribute_to_pool};
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -42,8 +42,13 @@ pub fn handler(ctx: Context<CancelNoTradeWindow>) -> Result<()> {
     let commitment_key = ctx.accounts.commitment.key();
     let weight = ctx.accounts.commitment.weight;
     let stake = ctx.accounts.commitment.stake_amount;
+    let acc = ctx.accounts.reward_pool.acc_reward_per_weight;
+    let reward_debt = ctx.accounts.commitment.reward_debt;
 
-    let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, stake)?;
+    let pending_yield = compute_pending_yield(weight, acc, reward_debt)?;
+    let total = stake.saturating_add(pending_yield);
+
+    let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, total)?;
 
     let principal_dest = if redistributed {
         ctx.accounts.protocol_vault.to_account_info()

@@ -16,8 +16,6 @@ import {
   getI64Encoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   getU8Decoder,
@@ -102,7 +100,7 @@ export type SeedCreateNoTradeWindowInstruction<
 export type SeedCreateNoTradeWindowInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   windowStartHour: number;
   windowEndHour: number;
   nonce: bigint;
@@ -111,7 +109,7 @@ export type SeedCreateNoTradeWindowInstructionData = {
 
 export type SeedCreateNoTradeWindowInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   windowStartHour: number;
   windowEndHour: number;
   nonce: number | bigint;
@@ -123,7 +121,7 @@ export function getSeedCreateNoTradeWindowInstructionDataEncoder(): FixedSizeEnc
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["windowStartHour", getU8Encoder()],
       ["windowEndHour", getU8Encoder()],
       ["nonce", getU64Encoder()],
@@ -140,7 +138,7 @@ export function getSeedCreateNoTradeWindowInstructionDataDecoder(): FixedSizeDec
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["windowStartHour", getU8Decoder()],
     ["windowEndHour", getU8Decoder()],
     ["nonce", getU64Decoder()],
@@ -173,7 +171,7 @@ export type SeedCreateNoTradeWindowAsyncInput<
   rewardPool?: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateNoTradeWindowInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateNoTradeWindowInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateNoTradeWindowInstructionDataArgs["durationSeconds"];
   windowStartHour: SeedCreateNoTradeWindowInstructionDataArgs["windowStartHour"];
   windowEndHour: SeedCreateNoTradeWindowInstructionDataArgs["windowEndHour"];
   nonce: SeedCreateNoTradeWindowInstructionDataArgs["nonce"];
@@ -293,7 +291,7 @@ export type SeedCreateNoTradeWindowInput<
   rewardPool: Address<TAccountRewardPool>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: SeedCreateNoTradeWindowInstructionDataArgs["stakeAmount"];
-  durationDays: SeedCreateNoTradeWindowInstructionDataArgs["durationDays"];
+  durationSeconds: SeedCreateNoTradeWindowInstructionDataArgs["durationSeconds"];
   windowStartHour: SeedCreateNoTradeWindowInstructionDataArgs["windowStartHour"];
   windowEndHour: SeedCreateNoTradeWindowInstructionDataArgs["windowEndHour"];
   nonce: SeedCreateNoTradeWindowInstructionDataArgs["nonce"];

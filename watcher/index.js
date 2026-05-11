@@ -179,6 +179,32 @@ app.get('/stats', (req, res) => {
   });
 });
 
+// My Commitments history — terminated events for a specific owner
+app.get('/events', (req, res) => {
+  const owner = req.query.owner;
+  const limit = parseInt(req.query.limit || '200', 10);
+  if (!owner) {
+    return res.status(400).json({ error: 'owner query param required' });
+  }
+  try {
+    const events = db.getTerminatedEvents(owner, limit);
+    res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Siren Graveyard — recent Slashed + Cancelled events
+app.get('/graveyard', (req, res) => {
+  const limit = parseInt(req.query.limit || '50', 10);
+  try {
+    const events = db.getGraveyardEvents(limit);
+    res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 recoverOnStartup().then(() => {
   setInterval(runPatrol, 60_000);
   // Kick off event-scanner backfill in background; do not block server startup.

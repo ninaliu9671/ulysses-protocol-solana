@@ -14,8 +14,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   getU64Decoder,
   getU64Encoder,
   transformEncoder,
@@ -106,13 +104,13 @@ export type CreateHoldAboveInstruction<
 export type CreateHoldAboveInstructionData = {
   discriminator: ReadonlyUint8Array;
   stakeAmount: bigint;
-  durationDays: number;
+  durationSeconds: bigint;
   floorAmount: bigint;
 };
 
 export type CreateHoldAboveInstructionDataArgs = {
   stakeAmount: number | bigint;
-  durationDays: number;
+  durationSeconds: number | bigint;
   floorAmount: number | bigint;
 };
 
@@ -121,7 +119,7 @@ export function getCreateHoldAboveInstructionDataEncoder(): FixedSizeEncoder<Cre
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["stakeAmount", getU64Encoder()],
-      ["durationDays", getU16Encoder()],
+      ["durationSeconds", getU64Encoder()],
       ["floorAmount", getU64Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CREATE_HOLD_ABOVE_DISCRIMINATOR }),
@@ -132,7 +130,7 @@ export function getCreateHoldAboveInstructionDataDecoder(): FixedSizeDecoder<Cre
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["stakeAmount", getU64Decoder()],
-    ["durationDays", getU16Decoder()],
+    ["durationSeconds", getU64Decoder()],
     ["floorAmount", getU64Decoder()],
   ]);
 }
@@ -166,7 +164,7 @@ export type CreateHoldAboveAsyncInput<
   agentGuardianPda?: Address<TAccountAgentGuardianPda>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateHoldAboveInstructionDataArgs["stakeAmount"];
-  durationDays: CreateHoldAboveInstructionDataArgs["durationDays"];
+  durationSeconds: CreateHoldAboveInstructionDataArgs["durationSeconds"];
   floorAmount: CreateHoldAboveInstructionDataArgs["floorAmount"];
 };
 
@@ -309,7 +307,7 @@ export type CreateHoldAboveInput<
   agentGuardianPda: Address<TAccountAgentGuardianPda>;
   systemProgram?: Address<TAccountSystemProgram>;
   stakeAmount: CreateHoldAboveInstructionDataArgs["stakeAmount"];
-  durationDays: CreateHoldAboveInstructionDataArgs["durationDays"];
+  durationSeconds: CreateHoldAboveInstructionDataArgs["durationSeconds"];
   floorAmount: CreateHoldAboveInstructionDataArgs["floorAmount"];
 };
 

@@ -57,3 +57,37 @@ export function saveCachedCommitment(c: CachedCommitment): void {
   const trimmed = list.slice(0, 500);
   window.localStorage.setItem(storageKey(c.owner), JSON.stringify(trimmed));
 }
+
+// Optimistic local termination status written immediately after a claim/cancel
+// tx succeeds, so the UI shows the correct status before the on-chain event
+// is indexed and returned by fetchTerminationEventsForOwner.
+const TERM_KEY_PREFIX = "ulysses:my-terminations:v1:";
+
+export type LocalTermination = {
+  pubkey: string;
+  kind: "Claimed" | "Cancelled" | "Slashed";
+  signature: string;
+};
+
+function termStorageKey(owner: string): string {
+  return `${TERM_KEY_PREFIX}${owner}`;
+}
+
+export function saveLocalTermination(owner: string, t: LocalTermination): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(termStorageKey(owner));
+    const list: LocalTermination[] = raw ? (JSON.parse(raw) as LocalTermination[]) : [];
+    if (!list.find((x) => x.pubkey === t.pubkey)) list.unshift(t);
+    window.localStorage.setItem(termStorageKey(owner), JSON.stringify(list.slice(0, 200)));
+  } catch { /* best effort */ }
+}
+
+export function loadLocalTerminations(owner: string): LocalTermination[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(termStorageKey(owner));
+    if (!raw) return [];
+    return JSON.parse(raw) as LocalTermination[];
+  } catch { return []; }
+}
