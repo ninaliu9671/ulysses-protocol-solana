@@ -13,10 +13,11 @@ type Row = {
   rank: number;
   owner: string;
   typeEmojis: string;
-  earnedSol: number;    // yield_paid from Claimed events + claimable yield on expired live commitments
-  pendingSol: number;   // pending yield on active live commitments
+  liveStakeSol: number;
+  earnedSol: number;
+  pendingSol: number;
   totalYieldSol: number;
-  roiPct: number;       // totalYield / liveStake * 100
+  roiPct: number;
 };
 
 function shortAddr(a: string): string {
@@ -64,14 +65,22 @@ export function LeaderboardSection({ limit }: { limit?: number } = {}) {
         const earnedSol = Number(g.claimedYield + g.claimableYield) / 1e9;
         const pendingSol = Number(g.pendingYield) / 1e9;
         const totalYieldSol = earnedSol + pendingSol;
-        const stake = Number(g.liveStake) / 1e9;
-        const roiPct = stake > 0 ? (totalYieldSol / stake) * 100 : 0;
+        const liveStakeSol = Number(g.liveStake) / 1e9;
+        const roiPct = liveStakeSol > 0 ? (totalYieldSol / liveStakeSol) * 100 : 0;
         const uniqueTypes = Array.from(new Set(g.items.map((i) => i.type)));
         uniqueTypes.sort((a, b) =>
           COMMITMENT_TYPES.findIndex((t) => t.key === a) -
           COMMITMENT_TYPES.findIndex((t) => t.key === b),
         );
-        return { owner, typeEmojis: uniqueTypes.map((k) => TYPE_BY_KEY[k].emoji).join(" "), earnedSol, pendingSol, totalYieldSol, roiPct };
+        return {
+          owner,
+          typeEmojis: uniqueTypes.map((k) => TYPE_BY_KEY[k].emoji).join(" "),
+          liveStakeSol,
+          earnedSol,
+          pendingSol,
+          totalYieldSol,
+          roiPct,
+        };
       })
       .sort((a, b) => b.totalYieldSol - a.totalYieldSol);
 
@@ -90,31 +99,37 @@ export function LeaderboardSection({ limit }: { limit?: number } = {}) {
       {rows.length === 0 ? (
         <p className="text-sm" style={{ color: "var(--muted)" }}>No commitments yet.</p>
       ) : (
-        <div className="space-y-2">
+        <div>
           <div className="grid grid-cols-12 gap-1 text-[10px] font-bold pb-2" style={{ color: "var(--muted)", letterSpacing: "0.1em", borderBottom: "1px solid var(--border)" }}>
             <div className="col-span-1">RANK</div>
             <div className="col-span-2">USER</div>
-            <div className="col-span-2">TYPES</div>
+            <div className="col-span-1">TYPES</div>
+            <div className="col-span-2 text-right">STAKED</div>
             <div className="col-span-2 text-right">EARNED</div>
-            <div className="col-span-2 text-right">PENDING</div>
+            <div className="col-span-1 text-right">PENDING</div>
             <div className="col-span-2 text-right">TOTAL</div>
             <div className="col-span-1 text-right">ROI</div>
           </div>
-          {rows.map((r) => (
-            <div key={r.owner} className="grid grid-cols-12 gap-1 text-sm py-1.5" style={{ color: "var(--foreground)" }}>
-              <div className="col-span-1">{MEDAL[r.rank] ?? r.rank}</div>
-              <div className="col-span-2 font-mono text-xs">{shortAddr(r.owner)}</div>
-              <div className="col-span-2 text-sm">{r.typeEmojis}</div>
-              <div className="col-span-2 text-right text-xs" style={{ color: r.earnedSol > 0 ? "var(--gold)" : "var(--muted)" }}>
-                {r.earnedSol > 0 ? `+${r.earnedSol.toFixed(4)}` : "—"}
+          <div className="space-y-0 overflow-y-auto" style={{ maxHeight: "420px" }}>
+            {rows.map((r) => (
+              <div key={r.owner} className="grid grid-cols-12 gap-1 text-sm py-1.5" style={{ color: "var(--foreground)" }}>
+                <div className="col-span-1">{MEDAL[r.rank] ?? r.rank}</div>
+                <div className="col-span-2 font-mono text-xs">{shortAddr(r.owner)}</div>
+                <div className="col-span-1 text-sm">{r.typeEmojis || <span style={{ color: "var(--muted)" }}>—</span>}</div>
+                <div className="col-span-2 text-right text-xs" style={{ color: "var(--foreground)" }}>
+                  {r.liveStakeSol > 0 ? r.liveStakeSol.toFixed(4) : <span style={{ color: "var(--muted)" }}>—</span>}
+                </div>
+                <div className="col-span-2 text-right text-xs" style={{ color: r.earnedSol > 0 ? "var(--gold)" : "var(--muted)" }}>
+                  {r.earnedSol > 0 ? `+${r.earnedSol.toFixed(4)}` : "—"}
+                </div>
+                <div className="col-span-1 text-right text-xs" style={{ color: r.pendingSol > 0 ? "#86efac" : "var(--muted)" }}>
+                  {r.pendingSol > 0 ? `+${r.pendingSol.toFixed(4)}` : "—"}
+                </div>
+                <div className="col-span-2 text-right text-xs" style={{ color: "var(--gold)" }}>+{r.totalYieldSol.toFixed(4)}</div>
+                <div className="col-span-1 text-right text-xs" style={{ color: "var(--gold)" }}>{r.roiPct.toFixed(2)}%</div>
               </div>
-              <div className="col-span-2 text-right text-xs" style={{ color: r.pendingSol > 0 ? "#86efac" : "var(--muted)" }}>
-                {r.pendingSol > 0 ? `+${r.pendingSol.toFixed(6)}` : "—"}
-              </div>
-              <div className="col-span-2 text-right text-xs" style={{ color: "var(--gold)" }}>+{r.totalYieldSol.toFixed(4)}</div>
-              <div className="col-span-1 text-right text-xs" style={{ color: "var(--gold)" }}>{r.roiPct.toFixed(2)}%</div>
-            </div>
-          ))}
+            ))}
+          </div>
           <div className="mt-4 pt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px]" style={{ color: "var(--muted)", borderTop: "1px solid var(--border)", letterSpacing: "0.05em" }}>
             {COMMITMENT_TYPES.map((t) => (
               <span key={t.key} className="flex items-center gap-1">

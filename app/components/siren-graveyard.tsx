@@ -52,6 +52,7 @@ export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
             <div className="col-span-1 text-center">PROGRESS</div>
             <div className="col-span-2 text-right">LOSS (SOL)</div>
           </div>
+          <div className="overflow-y-auto" style={{ maxHeight: "420px" }}>
           {data.map((e) => {
             const meta = e.commitmentType !== "Unknown" ? TYPE_BY_KEY[e.commitmentType] : null;
             const isFailed = e.kind === "Slashed";
@@ -79,6 +80,7 @@ export function SirenGraveyardSection({ limit = 10 }: { limit?: number } = {}) {
               </div>
             );
           })}
+          </div>
         </div>
       )}
     </div>
