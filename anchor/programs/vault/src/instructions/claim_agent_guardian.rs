@@ -68,6 +68,10 @@ pub fn handler(ctx: Context<ClaimAgentGuardian>) -> Result<()> {
         owner: ctx.accounts.owner.key(),
         principal: stake,
         yield_paid,
+        type_disc: crate::events::TYPE_DISC_AGENT_GUARDIAN,
+        target_mint: Pubkey::default(),
+        created_at: ctx.accounts.commitment.created_at,
+        expires_at: ctx.accounts.commitment.expires_at,
     });
 
     Ok(())

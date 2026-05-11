@@ -61,6 +61,9 @@ pub fn handler<'info>(ctx: Context<'_, '_, 'info, 'info, SlashHoldAbove<'info>>)
     let commitment_key = ctx.accounts.commitment.key();
     let weight = ctx.accounts.commitment.weight;
     let stake = ctx.accounts.commitment.stake_amount;
+    let target_mint = ctx.accounts.commitment.target_mint;
+    let created_at = ctx.accounts.commitment.created_at;
+    let expires_at = ctx.accounts.commitment.expires_at;
 
     let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, stake)?;
 
@@ -84,6 +87,10 @@ pub fn handler<'info>(ctx: Context<'_, '_, 'info, 'info, SlashHoldAbove<'info>>)
         commitment: commitment_key,
         owner: owner_key,
         principal: stake,
+        type_disc: crate::events::TYPE_DISC_HOLD_ABOVE,
+        target_mint,
+        created_at,
+        expires_at,
     });
 
     Ok(())

@@ -68,6 +68,10 @@ pub fn handler(ctx: Context<ClaimNoSell>) -> Result<()> {
         owner: ctx.accounts.owner.key(),
         principal: stake,
         yield_paid,
+        type_disc: crate::events::TYPE_DISC_NO_SELL,
+        target_mint: ctx.accounts.commitment.target_mint,
+        created_at: ctx.accounts.commitment.created_at,
+        expires_at: ctx.accounts.commitment.expires_at,
     });
 
     Ok(())

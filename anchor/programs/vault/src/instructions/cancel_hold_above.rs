@@ -65,6 +65,10 @@ pub fn handler(ctx: Context<CancelHoldAbove>) -> Result<()> {
         commitment: commitment_key,
         owner: ctx.accounts.owner.key(),
         principal: stake,
+        type_disc: crate::events::TYPE_DISC_HOLD_ABOVE,
+        target_mint: ctx.accounts.commitment.target_mint,
+        created_at: ctx.accounts.commitment.created_at,
+        expires_at: ctx.accounts.commitment.expires_at,
     });
 
     Ok(())

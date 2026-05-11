@@ -65,6 +65,10 @@ pub fn handler(ctx: Context<CancelNoTradeWindow>) -> Result<()> {
         commitment: commitment_key,
         owner: ctx.accounts.owner.key(),
         principal: stake,
+        type_disc: crate::events::TYPE_DISC_NO_TRADE_WINDOW,
+        target_mint: Pubkey::default(),
+        created_at: ctx.accounts.commitment.created_at,
+        expires_at: ctx.accounts.commitment.expires_at,
     });
 
     Ok(())

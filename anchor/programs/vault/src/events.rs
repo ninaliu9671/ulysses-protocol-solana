@@ -16,6 +16,10 @@ pub struct Claimed {
     pub owner: Pubkey,
     pub principal: u64,
     pub yield_paid: u64,
+    pub type_disc: u8,
+    pub target_mint: Pubkey,
+    pub created_at: i64,
+    pub expires_at: i64,
 }
 
 #[event]
@@ -23,6 +27,10 @@ pub struct Cancelled {
     pub commitment: Pubkey,
     pub owner: Pubkey,
     pub principal: u64,
+    pub type_disc: u8,
+    pub target_mint: Pubkey,
+    pub created_at: i64,
+    pub expires_at: i64,
 }
 
 #[event]
@@ -30,6 +38,10 @@ pub struct Slashed {
     pub commitment: Pubkey,
     pub owner: Pubkey,
     pub principal: u64,
+    pub type_disc: u8,
+    pub target_mint: Pubkey,
+    pub created_at: i64,
+    pub expires_at: i64,
 }
 
 #[event]

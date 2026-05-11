@@ -51,6 +51,8 @@ pub fn handler(ctx: Context<SlashNoTradeWindow>) -> Result<()> {
     let owner_key = ctx.accounts.commitment.owner;
     let weight = ctx.accounts.commitment.weight;
     let stake = ctx.accounts.commitment.stake_amount;
+    let created_at = ctx.accounts.commitment.created_at;
+    let expires_at = ctx.accounts.commitment.expires_at;
 
     let redistributed = redistribute_to_pool(&mut ctx.accounts.reward_pool, weight, stake)?;
 
@@ -74,6 +76,10 @@ pub fn handler(ctx: Context<SlashNoTradeWindow>) -> Result<()> {
         commitment: commitment_key,
         owner: owner_key,
         principal: stake,
+        type_disc: crate::events::TYPE_DISC_NO_TRADE_WINDOW,
+        target_mint: Pubkey::default(),
+        created_at,
+        expires_at,
     });
 
     Ok(())
