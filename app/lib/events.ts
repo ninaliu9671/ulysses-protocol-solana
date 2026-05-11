@@ -32,6 +32,17 @@ function readU64LE(b: Uint8Array, o: number): bigint {
   return v;
 }
 
+function readI64LE(b: Uint8Array, o: number): number {
+  let v = 0n;
+  for (let i = 0; i < 8; i++) v |= BigInt(b[o + i]) << BigInt(8 * i);
+  if (v >= 0x8000000000000000n) v -= 0x10000000000000000n;
+  return Number(v);
+}
+
+function typeDiscToKey(disc: number): "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian" | "Unknown" {
+  return (["NoSell", "HoldAbove", "NoTradeWindow", "AgentGuardian"] as const)[disc] ?? "Unknown";
+}
+
 // Bytes32 → base58 (for pubkey reconstruction)
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 export function bytes32ToBase58(bytes: Uint8Array): string {
@@ -57,24 +68,39 @@ function eq(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+// Byte layout for Slashed / Cancelled (post-upgrade):
+//   [0:8]   discriminator
+//   [8:40]  commitment (Pubkey)
+//   [40:72] owner (Pubkey)
+//   [72:80] principal (u64)
+//   [80]    type_disc (u8)
+//   [81:113] target_mint (Pubkey)
+//   [113:121] created_at (i64)
+//   [121:129] expires_at (i64)
+//
+// Byte layout for Claimed (post-upgrade):
+//   [0:8]   discriminator
+//   [8:40]  commitment
+//   [40:72] owner
+//   [72:80] principal (u64)
+//   [80:88] yield_paid (u64)
+//   [88]    type_disc (u8)
+//   [89:121] target_mint (Pubkey)
+//   [121:129] created_at (i64)
+//   [129:137] expires_at (i64)
+
 export type SlashedEvent = {
+  kind: "Slashed" | "Cancelled";
   signature: string;
   blockTime: number | null;
   commitment: string;
   owner: string;
-  principal: bigint; // lamports
-  type: "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian" | "Unknown";
+  principal: bigint;
+  commitmentType: "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian" | "Unknown";
+  targetMint: string | null;
+  createdAt: number | null;
+  expiresAt: number | null;
 };
-
-function extractSlashType(logs: string[], slashLogIdx: number): SlashedEvent["type"] {
-  // Walk back from the Slashed `Program data` line to find the most recent
-  // `Program log: Instruction: Slash<Type>` emitted by the vault program.
-  for (let i = slashLogIdx - 1; i >= 0; i--) {
-    const m = logs[i].match(/Instruction: Slash(NoSell|HoldAbove|NoTradeWindow|AgentGuardian)/);
-    if (m) return m[1] as SlashedEvent["type"];
-  }
-  return "Unknown";
-}
 
 type SignatureInfo = { signature: string; blockTime: number | null; err: unknown };
 type TxMeta = {
@@ -83,15 +109,14 @@ type TxMeta = {
 };
 
 /**
- * Fetch recent Slashed events emitted by the vault program.
- * @param limit Max events to return (we'll scan up to limit*4 sigs).
+ * Fetch recent Slashed + Cancelled events emitted by the vault program.
+ * @param limit Max events to return (we'll scan up to 100 sigs).
  */
 export async function fetchSlashedEvents(
   rpcUrl: string,
   limit: number,
 ): Promise<SlashedEvent[]> {
-  const slashedDisc = await getSlashedDisc();
-  // Cap sig fetch — public devnet RPC chokes on big lists.
+  const [slashedDisc, cancelledDisc] = await Promise.all([getSlashedDisc(), getCancelledDisc()]);
   const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
     VAULT_PROGRAM_ADDRESS,
     { limit: 100 },
@@ -99,7 +124,6 @@ export async function fetchSlashedEvents(
   if (!sigs?.length) return [];
 
   const events: SlashedEvent[] = [];
-  // Sequential batches of 3 to stay under devnet rate limit (~10 req/s).
   const BATCH = 3;
   for (let i = 0; i < sigs.length && events.length < limit; i += BATCH) {
     const batch = sigs.slice(i, i + BATCH);
@@ -114,24 +138,34 @@ export async function fetchSlashedEvents(
     for (let j = 0; j < txs.length; j++) {
       const tx = txs[j];
       if (!tx?.meta?.logMessages) continue;
-      const logs = tx.meta.logMessages;
-      for (let logIdx = 0; logIdx < logs.length; logIdx++) {
-        const m = logs[logIdx].match(/^Program data: (.+)$/);
+      for (const log of tx.meta.logMessages) {
+        const m = log.match(/^Program data: (.+)$/);
         if (!m) continue;
         const bytes = base64ToBytes(m[1]);
-        if (bytes.length < 8) continue;
-        if (!eq(bytes.slice(0, 8), slashedDisc)) continue;
-        if (bytes.length < 8 + 32 + 32 + 8) continue;
+        if (bytes.length < 80) continue;
+        let kind: "Slashed" | "Cancelled" | null = null;
+        if (eq(bytes.slice(0, 8), slashedDisc)) kind = "Slashed";
+        else if (eq(bytes.slice(0, 8), cancelledDisc)) kind = "Cancelled";
+        if (!kind) continue;
         const commitment = bytes32ToBase58(bytes.slice(8, 40));
         const owner = bytes32ToBase58(bytes.slice(40, 72));
         const principal = readU64LE(bytes, 72);
+        const hasNewFields = bytes.length >= 129;
+        const commitmentType = hasNewFields ? typeDiscToKey(bytes[80]) : "Unknown";
+        const targetMint = hasNewFields ? bytes32ToBase58(bytes.slice(81, 113)) : null;
+        const createdAt = hasNewFields ? readI64LE(bytes, 113) : null;
+        const expiresAt = hasNewFields ? readI64LE(bytes, 121) : null;
         events.push({
+          kind,
           signature: batch[j].signature,
           blockTime: tx.blockTime,
           commitment,
           owner,
           principal,
-          type: extractSlashType(logs, logIdx),
+          commitmentType,
+          targetMint,
+          createdAt,
+          expiresAt,
         });
       }
     }
@@ -141,9 +175,8 @@ export async function fetchSlashedEvents(
 
 /**
  * Termination event covers Slashed / Cancelled / Claimed.
- * Each event payload: commitment(32) + owner(32) + principal(8). Claimed
- * additionally has yield_paid(8) but we don't need it for the my-commitments
- * status display.
+ * Post-upgrade events include type_disc, target_mint, created_at, expires_at.
+ * Pre-upgrade events have only commitment/owner/principal (backward compat: new fields null).
  */
 export type TerminationKind = "Slashed" | "Cancelled" | "Claimed";
 
@@ -151,10 +184,14 @@ export type TerminationEvent = {
   kind: TerminationKind;
   signature: string;
   blockTime: number | null;
-  commitment: string; // PDA pubkey of the closed commitment
+  commitment: string;
   owner: string;
-  principal: bigint; // for Claimed: returned-to-owner; for Slashed/Cancelled: forfeited
-  yieldPaid?: bigint; // Claimed only
+  principal: bigint;
+  yieldPaid?: bigint;
+  commitmentType: "NoSell" | "HoldAbove" | "NoTradeWindow" | "AgentGuardian" | "Unknown";
+  targetMint: string | null;
+  createdAt: number | null;
+  expiresAt: number | null;
 };
 
 export async function fetchTerminationEventsForOwner(
@@ -193,7 +230,7 @@ export async function fetchTerminationEventsForOwner(
         const m = log.match(/^Program data: (.+)$/);
         if (!m) continue;
         const bytes = base64ToBytes(m[1]);
-        if (bytes.length < 8 + 32 + 32 + 8) continue;
+        if (bytes.length < 80) continue;
         let kind: TerminationKind | null = null;
         if (eq(bytes.slice(0, 8), slashedDisc)) kind = "Slashed";
         else if (eq(bytes.slice(0, 8), cancelledDisc)) kind = "Cancelled";
@@ -203,18 +240,96 @@ export async function fetchTerminationEventsForOwner(
         const ownerInEvent = bytes32ToBase58(bytes.slice(40, 72));
         if (ownerInEvent !== owner) continue;
         const principal = readU64LE(bytes, 72);
-        const yieldPaid = kind === "Claimed" && bytes.length >= 88 ? readU64LE(bytes, 80) : undefined;
-        events.push({
-          kind,
-          signature: batch[j].signature,
-          blockTime: tx.blockTime,
-          commitment,
-          owner: ownerInEvent,
-          principal,
-          yieldPaid,
-        });
+
+        if (kind === "Claimed") {
+          // Claimed: yield_paid at [80:88], new fields start at [88]
+          const yieldPaid = bytes.length >= 88 ? readU64LE(bytes, 80) : undefined;
+          const hasNewFields = bytes.length >= 137;
+          const commitmentType = hasNewFields ? typeDiscToKey(bytes[88]) : "Unknown";
+          const targetMint = hasNewFields ? bytes32ToBase58(bytes.slice(89, 121)) : null;
+          const createdAt = hasNewFields ? readI64LE(bytes, 121) : null;
+          const expiresAt = hasNewFields ? readI64LE(bytes, 129) : null;
+          events.push({
+            kind,
+            signature: batch[j].signature,
+            blockTime: tx.blockTime,
+            commitment,
+            owner: ownerInEvent,
+            principal,
+            yieldPaid,
+            commitmentType,
+            targetMint,
+            createdAt,
+            expiresAt,
+          });
+        } else {
+          // Slashed / Cancelled: new fields start at [80]
+          const hasNewFields = bytes.length >= 129;
+          const commitmentType = hasNewFields ? typeDiscToKey(bytes[80]) : "Unknown";
+          const targetMint = hasNewFields ? bytes32ToBase58(bytes.slice(81, 113)) : null;
+          const createdAt = hasNewFields ? readI64LE(bytes, 113) : null;
+          const expiresAt = hasNewFields ? readI64LE(bytes, 121) : null;
+          events.push({
+            kind,
+            signature: batch[j].signature,
+            blockTime: tx.blockTime,
+            commitment,
+            owner: ownerInEvent,
+            principal,
+            commitmentType,
+            targetMint,
+            createdAt,
+            expiresAt,
+          });
+        }
       }
     }
   }
   return events;
+}
+
+export type ClaimedEventGlobal = {
+  signature: string;
+  owner: string;
+  principal: bigint;
+  yieldPaid: bigint;
+};
+
+export async function fetchClaimedEventsGlobal(rpcUrl: string, limit = 100): Promise<ClaimedEventGlobal[]> {
+  const claimedDisc = await getClaimedDisc();
+  const sigs = await rpcCall<SignatureInfo[]>(rpcUrl, "getSignaturesForAddress", [
+    VAULT_PROGRAM_ADDRESS,
+    { limit: 100 },
+  ]);
+  if (!sigs?.length) return [];
+
+  const events: ClaimedEventGlobal[] = [];
+  const BATCH = 3;
+  for (let i = 0; i < sigs.length && events.length < limit; i += BATCH) {
+    const batch = sigs.slice(i, i + BATCH);
+    const txs = await Promise.all(
+      batch.map((s) =>
+        rpcCall<TxMeta>(rpcUrl, "getTransaction", [
+          s.signature,
+          { encoding: "json", maxSupportedTransactionVersion: 0 },
+        ]).catch(() => null),
+      ),
+    );
+    for (let j = 0; j < txs.length; j++) {
+      const tx = txs[j];
+      if (!tx?.meta?.logMessages) continue;
+      for (const log of tx.meta.logMessages) {
+        const m = log.match(/^Program data: (.+)$/);
+        if (!m) continue;
+        const bytes = base64ToBytes(m[1]);
+        if (bytes.length < 88) continue;
+        if (!eq(bytes.slice(0, 8), claimedDisc)) continue;
+        const owner = bytes32ToBase58(bytes.slice(40, 72));
+        const principal = readU64LE(bytes, 72);
+        const yieldPaid = readU64LE(bytes, 80);
+        events.push({ signature: batch[j].signature, owner, principal, yieldPaid });
+      }
+    }
+  }
+  return events.slice(0, limit);
 }
