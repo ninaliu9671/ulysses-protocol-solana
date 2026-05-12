@@ -3,12 +3,11 @@
 import { useMemo } from "react";
 import { useAllCommitments, type AllCommitment } from "../lib/hooks/use-all-commitments";
 import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
-import { useClaimedEvents } from "../lib/hooks/use-claimed-events";
+import { useWatcherHistory } from "../lib/hooks/use-watcher-history";
 import { COMMITMENT_TYPES, TYPE_BY_KEY } from "../lib/commitment-types";
 import { DEMO_MULTIPLIER } from "../lib/lamports";
 
 const MEDAL: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
-const PRECISION = 1_000_000_000n;
 
 type Row = {
   rank: number;
@@ -28,46 +27,49 @@ function shortAddr(a: string): string {
 export function LeaderboardSection({ limit }: { limit?: number } = {}) {
   const all = useAllCommitments();
   const metrics = useProtocolMetrics();
-  const claimedEvents = useClaimedEvents();
+  const watcherHistory = useWatcherHistory();
 
   const rows = useMemo<Row[]>(() => {
     if (!all || !metrics) return [];
-    const acc = metrics.accRewardPerWeight;
+    const vaultBalance = metrics.totalRedistributedLamports;
+    const globalWeight = metrics.totalWeight;
     const now = BigInt(Math.floor(Date.now() / 1000));
 
     type GroupData = {
       items: AllCommitment[];
-      liveStake: bigint;
-      claimableYield: bigint;
-      pendingYield: bigint;
-      claimedYield: bigint;
+      totalStake: bigint;    // active + all terminated principals
+      claimableYield: bigint; // expired active (proportional) + claimed yieldPaid
+      pendingYield: bigint;   // non-expired active (proportional)
     };
+    const empty = (): GroupData => ({ items: [], totalStake: 0n, claimableYield: 0n, pendingYield: 0n });
     const groups = new Map<string, GroupData>();
 
+    // Active commitments
     for (const c of all) {
-      const g = groups.get(c.owner) ?? { items: [], liveStake: 0n, claimableYield: 0n, pendingYield: 0n, claimedYield: 0n };
+      const g = groups.get(c.owner) ?? empty();
       g.items.push(c);
-      g.liveStake += c.stakeAmount;
-      const pendingL = (c.weight * acc) / PRECISION;
-      const yieldL = pendingL > c.rewardDebt ? pendingL - c.rewardDebt : 0n;
+      g.totalStake += c.stakeAmount;
+      const yieldL = globalWeight > 0n ? (c.weight * vaultBalance) / globalWeight : 0n;
       if (now >= c.expiresAt) g.claimableYield += yieldL;
       else g.pendingYield += yieldL;
       groups.set(c.owner, g);
     }
 
-    for (const e of claimedEvents ?? []) {
-      const g = groups.get(e.owner) ?? { items: [], liveStake: 0n, claimableYield: 0n, pendingYield: 0n, claimedYield: 0n };
-      g.claimedYield += e.yieldPaid;
+    // Historical terminated events from watcher (Slashed / Cancelled / Claimed)
+    for (const e of watcherHistory ?? []) {
+      const g = groups.get(e.owner) ?? empty();
+      g.totalStake += e.principal;
+      g.claimableYield += e.yieldPaid; // 0 for Slashed/Cancelled
       groups.set(e.owner, g);
     }
 
     const arr = Array.from(groups.entries())
       .map(([owner, g]) => {
-        const earnedSol = Number(g.claimedYield + g.claimableYield) / 1e9 * DEMO_MULTIPLIER;
+        const earnedSol = Number(g.claimableYield) / 1e9 * DEMO_MULTIPLIER;
         const pendingSol = Number(g.pendingYield) / 1e9 * DEMO_MULTIPLIER;
         const totalYieldSol = earnedSol + pendingSol;
-        const liveStakeSol = Number(g.liveStake) / 1e9 * DEMO_MULTIPLIER;
-        const roiPct = liveStakeSol > 0 ? (totalYieldSol / liveStakeSol) * 100 : 0;
+        const totalStakeSol = Number(g.totalStake) / 1e9 * DEMO_MULTIPLIER;
+        const roiPct = totalStakeSol > 0 ? (totalYieldSol / totalStakeSol) * 100 : 0;
         const uniqueTypes = Array.from(new Set(g.items.map((i) => i.type)));
         uniqueTypes.sort((a, b) =>
           COMMITMENT_TYPES.findIndex((t) => t.key === a) -
@@ -76,7 +78,7 @@ export function LeaderboardSection({ limit }: { limit?: number } = {}) {
         return {
           owner,
           typeEmojis: uniqueTypes.map((k) => TYPE_BY_KEY[k].emoji).join(" "),
-          liveStakeSol,
+          liveStakeSol: totalStakeSol,
           earnedSol,
           pendingSol,
           totalYieldSol,
@@ -86,14 +88,14 @@ export function LeaderboardSection({ limit }: { limit?: number } = {}) {
       .sort((a, b) => b.totalYieldSol - a.totalYieldSol);
 
     return arr.map((r, i) => ({ rank: i + 1, ...r })).slice(0, limit ?? arr.length);
-  }, [all, metrics, claimedEvents, limit]);
+  }, [all, metrics, watcherHistory, limit]);
 
   return (
     <div id="leaderboard" className="rounded-xl p-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
       <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: "1px solid var(--border)" }}>
         <div>
           <h3 className="text-lg font-bold" style={{ color: "var(--gold)" }}>Hall of Masts</h3>
-          <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Stakers ranked by total yield — earned (claimed + claimable) and pending.</p>
+          <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>All stakers ranked by total yield — earned (claimed + claimable) and pending.</p>
         </div>
         <span className="text-xs" style={{ color: "var(--muted)" }}>Top by total yield</span>
       </div>
@@ -104,7 +106,7 @@ export function LeaderboardSection({ limit }: { limit?: number } = {}) {
           <div className="grid grid-cols-12 gap-1 text-[10px] font-bold pb-2" style={{ color: "var(--muted)", letterSpacing: "0.1em", borderBottom: "1px solid var(--border)" }}>
             <div className="col-span-1 min-w-0">RANK</div>
             <div className="col-span-2 min-w-0">USER</div>
-            <div className="col-span-1 text-right min-w-0">STAKED</div>
+            <div className="col-span-1 text-right min-w-0">TOTAL STAKED</div>
             <div className="col-span-2 text-right min-w-0">EARNED</div>
             <div className="col-span-2 text-right min-w-0">PENDING</div>
             <div className="col-span-2 text-right min-w-0">TOTAL</div>

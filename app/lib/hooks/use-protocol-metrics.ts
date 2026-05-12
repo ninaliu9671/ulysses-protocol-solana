@@ -19,11 +19,14 @@ import { getProgramDerivedAddress, getBytesEncoder } from "@solana/kit";
 // Slashed/Cancelled/Claimed accounts are closed so they don't count here.
 // totalRedistributedLamports = current balance of protocol_vault PDA
 // (slash funds awaiting redistribution to disciplined stakers).
+// totalEarnedLamports = sum of proportional yields for EXPIRED commitments
+// = (sum of expired weights / totalWeight) * vaultBalance.
 export type ProtocolMetrics = {
   totalWeight: bigint;
   activeCommitments: number;
   activeStakedLamports: bigint;
   totalRedistributedLamports: bigint;
+  totalEarnedLamports: bigint;
   accRewardPerWeight: bigint;
   treasury: string;
 };
@@ -36,6 +39,11 @@ function readU64LE(b: Uint8Array, o: number): bigint {
   let v = 0n;
   for (let i = 0; i < 8; i++) v |= BigInt(b[o + i]) << BigInt(8 * i);
   return v;
+}
+
+function readI64LE(b: Uint8Array, o: number): bigint {
+  const v = readU64LE(b, o);
+  return v >= 0x8000000000000000n ? v - 0x10000000000000000n : v;
 }
 
 async function fetchMetrics(rpcUrl: string): Promise<ProtocolMetrics> {
@@ -51,27 +59,37 @@ async function fetchMetrics(rpcUrl: string): Promise<ProtocolMetrics> {
 
   let totalStaked = 0n;
   let totalWeight = 0n;
+  const now = BigInt(Math.floor(Date.now() / 1000));
+
+  // Offsets per type: disc8 + struct fields (Borsh, no padding)
+  //   NoSell/HoldAbove: owner32 mint32 floor8 | stake@80 weight@88 rewardDebt16 createdAt8 expiresAt@120
+  //   NoTrade:          owner32 nonce8 startH1 endH1 | stake@50 weight@58 rewardDebt16 createdAt8 expiresAt@90
+  //   AgentGuardian:    owner32 guardian32 | stake@72 weight@80 rewardDebt16 createdAt8 expiresAt@112
+  type WInfo = { weight: bigint; expiresAt: bigint };
+  const wInfos: WInfo[] = [];
 
   for (const acc of all) {
     const data = base64ToBytes(acc.account.data[0]);
-    // Common pattern: stake_amount + weight are u64 fields. Their offsets vary.
-    // We do a coarse parse: walk through each type's known layout.
-    // For simplicity, sum lamports from vault accounts via a separate path is heavier.
-    // Approach: decode using offsets from each type:
-    //   - NoSell/HoldAbove: disc8 owner32 mint32 floor8 stake8 weight8 ...
-    //   - NoTrade:          disc8 owner32 nonce8 startH1 endH1 stake8 weight8 ...
-    //   - AgentGuardian:    disc8 owner32 guardian32 stake8 weight8 ...
     const disc = data.slice(0, 8);
+    let weight: bigint;
+    let expiresAt: bigint;
     if (eq(disc, NO_SELL_COMMITMENT_DISCRIMINATOR) || eq(disc, HOLD_ABOVE_COMMITMENT_DISCRIMINATOR)) {
-      totalStaked += readU64LE(data, 8 + 32 + 32 + 8);
-      totalWeight += readU64LE(data, 8 + 32 + 32 + 8 + 8);
+      totalStaked += readU64LE(data, 80);
+      weight = readU64LE(data, 88);
+      expiresAt = readI64LE(data, 120);
     } else if (eq(disc, NO_TRADE_WINDOW_COMMITMENT_DISCRIMINATOR)) {
-      totalStaked += readU64LE(data, 8 + 32 + 8 + 1 + 1);
-      totalWeight += readU64LE(data, 8 + 32 + 8 + 1 + 1 + 8);
+      totalStaked += readU64LE(data, 50);
+      weight = readU64LE(data, 58);
+      expiresAt = readI64LE(data, 90);
     } else if (eq(disc, AGENT_GUARDIAN_COMMITMENT_DISCRIMINATOR)) {
-      totalStaked += readU64LE(data, 8 + 32 + 32);
-      totalWeight += readU64LE(data, 8 + 32 + 32 + 8);
+      totalStaked += readU64LE(data, 72);
+      weight = readU64LE(data, 80);
+      expiresAt = readI64LE(data, 112);
+    } else {
+      continue;
     }
+    totalWeight += weight;
+    wInfos.push({ weight, expiresAt });
   }
 
   // Reward pool
@@ -112,11 +130,20 @@ async function fetchMetrics(rpcUrl: string): Promise<ProtocolMetrics> {
     /* ignore */
   }
 
+  let earnedWeightSum = 0n;
+  for (const { weight, expiresAt } of wInfos) {
+    if (now >= expiresAt) earnedWeightSum += weight;
+  }
+  const totalEarnedLamports = totalWeight > 0n
+    ? (earnedWeightSum * totalRedistributed) / totalWeight
+    : 0n;
+
   return {
     totalWeight,
     activeCommitments: all.length,
     activeStakedLamports: totalStaked,
     totalRedistributedLamports: totalRedistributed,
+    totalEarnedLamports,
     accRewardPerWeight,
     treasury,
   };

@@ -1,7 +1,6 @@
 "use client";
 
 import { useProtocolMetrics } from "../lib/hooks/use-protocol-metrics";
-import { useProtocolStats } from "../lib/hooks/use-protocol-stats";
 import { lamportsToDisplaySol } from "../lib/lamports";
 
 export function HeroSection() {
@@ -136,17 +135,9 @@ export function HeroSection() {
 
 function StatsBar() {
   const metrics = useProtocolMetrics();
-  const { stats: protocolStats } = useProtocolStats();
 
   const fmt = (l: bigint | undefined): string =>
     l === undefined ? "0.00 SOL" : lamportsToDisplaySol(l, 2) + " SOL";
-
-  const totalSlashed = protocolStats
-    ? BigInt(protocolStats.total_slashed_lamports)
-    : undefined;
-  const totalRedistributed = protocolStats
-    ? BigInt(protocolStats.total_redistributed_lamports)
-    : undefined;
 
   const stats = [
     { icon: <VaultIcon />, value: fmt(metrics?.activeStakedLamports), label: "Active Staked" },
@@ -155,8 +146,8 @@ function StatsBar() {
       value: metrics ? metrics.activeCommitments.toString() : "—",
       label: "Active Commitments",
     },
-    { icon: <RewardIcon />, value: fmt(totalSlashed), label: "Total Slashed" },
-    { icon: <RewardIcon />, value: fmt(totalRedistributed), label: "Total Redistributed" },
+    { icon: <RewardIcon />, value: fmt(metrics?.totalRedistributedLamports), label: "Total Slashed" },
+    { icon: <RewardIcon />, value: fmt(metrics?.totalEarnedLamports), label: "Total Redistributed" },
   ];
 
   return (

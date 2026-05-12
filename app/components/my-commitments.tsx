@@ -25,8 +25,6 @@ import { TYPE_BY_KEY } from "../lib/commitment-types";
 import { saveLocalTermination } from "../lib/my-commitments-cache";
 import { lamportsToDisplaySol } from "../lib/lamports";
 
-const PRECISION = 1_000_000_000n;
-
 const STATUS_BADGES: Record<CommitmentStatus, { emoji: string; label: string; color: string }> = {
   Processing: { emoji: "🟡", label: "Processing", color: "#fcd34d" },
   Claimable:  { emoji: "🟢", label: "Claimable",  color: "#86efac" },
@@ -59,9 +57,11 @@ export function MyCommitmentsSection() {
   const [confirmInput, setConfirmInput] = useState("");
 
   function pendingYield(row: MergedCommitment): bigint {
-    if (!metrics || !row.weight || row.rewardDebt === undefined) return 0n;
-    const accumulated = (row.weight * metrics.accRewardPerWeight) / PRECISION;
-    return accumulated > row.rewardDebt ? accumulated - row.rewardDebt : 0n;
+    if (!metrics || !row.weight) return 0n;
+    const vaultBalance = metrics.totalRedistributedLamports;
+    const globalWeight = metrics.totalWeight;
+    if (globalWeight <= 0n) return 0n;
+    return (row.weight * vaultBalance) / globalWeight;
   }
 
   function progressPct(row: MergedCommitment): number {
